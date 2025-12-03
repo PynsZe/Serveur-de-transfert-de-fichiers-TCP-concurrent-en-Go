@@ -8,7 +8,7 @@ import (
 	"net"
 	"os"
 	"strings"
-	"time"
+	//"time"
 )
 
 func RunServer(port *string, dir *string) {
@@ -75,7 +75,7 @@ func handleClient(c net.Conn, rootDir string){
 
 		/* commandes */
 
-		if command == "List"{
+		if commande == "List"{
 			handleList(writer, reader, rootDir)
 		} else if commande == "Get"{
 			if len(partie) < 2{

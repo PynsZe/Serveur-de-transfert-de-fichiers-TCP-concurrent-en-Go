@@ -40,12 +40,14 @@ func Run(remote string) {
 			return
 		}
 		out.Flush()
-
-		if (line == "end"){
-			slog.Info("Session closed by user")
-			return
+		switch line{
+			case "end":
+				slog.Info("Session closed by user")
+				return
+			case "List":
+				handleListClient(in,out)
+				return
 		}
-
 		resp, err := in.ReadString('\n')
 		if (err != nil){
 			slog.Error(e.Error())
@@ -54,4 +56,46 @@ func Run(remote string) {
 
 		fmt.Println(resp)
 	}
+}
+
+func handleListClient(in *bufio.Reader,out *bufio.Writer) {
+
+	// Lecture de "FileCnt X"
+	header, err := in.ReadString('\n')
+	if err != nil {
+		slog.Error("Erreur réception FileCnt : " + err.Error())
+		return
+	}
+	header = strings.TrimSpace(header)
+	fmt.Println(header)
+
+	// Extraction du nombre de fichiers
+	parts := strings.Fields(header)
+	if len(parts) != 2 {
+		slog.Error("Réponse FileCnt incorrecte")
+		return
+	}
+
+	// Conversion X en entier
+	var count int
+	fmt.Sscanf(parts[1], "%d", &count)
+
+	// Lecture des X lignes suivantes
+	for i := 0; i < count; i++ {
+		line, err := in.ReadString('\n')
+		if err != nil {
+			slog.Error("Erreur lecture fichier : " + err.Error())
+			return
+		}
+		fmt.Print(line)
+	}
+
+	// Une fois la liste reçue → envoyer OK
+	fmt.Println("→ Envoi OK")
+	_, err = out.WriteString("OK\n")
+	if err != nil {
+		slog.Error("Erreur envoi OK : " + err.Error())
+		return
+	}
+	out.Flush()
 }

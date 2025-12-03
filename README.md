@@ -1,93 +1,166 @@
-# salou-moriceau-tonghatet
+
+# Travail à faire
+
+## Avant-propos 
+Lors de ce projet, vous devez développer des programmes permettant l'échange de fichiers via une connexion tcp.
+
+Clients et serveurs échangent deux types de messages : des éléments de protocoles (commandes ou réponses) et des données (le contenu des fichiers).
+Les éléments de protocoles se terminent toujours par un retour à la ligne.
+Les données sont envoyées sous forme d'un flux binaire.
+
+## Contraintes
+  - Le serveur doit pouvoir répondre à plusieurs clients simultanéments.
+  - Le code ne doit pas comporter de _race condition_.
+  - Le serveur doit _logger_ les informations relatives à chaque connexion : date de la connexion et adresse du client, liste des fichiers téléchargés, date de la déconnexion.
+  - Le serveur doit afficher "en temps réel" le nombre de client connecté.
+  - Lorsque le mode `debug` est activé, client et serveur doivent afficher l'ensemble des informations pertinentes pour décrire leur exécution.
+  - L'ensemble des erreurs doivent être traitées.
+  - Le code doit être documenté.
 
 
+## Liste des commandes, partie 1
+Ces commandes sont envoyées par le client au serveur. 
+Pour chaque commande, les réponses possibles du serveur sont données.
 
-## Getting started
+### List 
+Sur réception de la commande `List`, le serveur retourne la liste des fichiers disponibles :
+  - `FileCnt` suivi d'une espace, suivi d'un nombre entier correspondant au nombre de fichiers disponibles.
+  - puis, pour chaque fichier, son nom, suivi d'une espace, suivi d'un nombre entier correspondant à sa taille en octets.
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+Par exemple : 
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
+``` 
+FileCnt 5
+a.txt 5 
+b.txt 17
+data.csv 3456
+mesmotsdepassessecrets.odt 65665
+script.sh 345
+``` 
 
-## Add your files
+Après avoir reçu le nom et la taille du dernier fichier de la liste, le client répond par `OK`.
 
-- [ ] [Create](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#create-a-file) or [upload](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#upload-a-file) files
-- [ ] [Add files using the command line](https://docs.gitlab.com/topics/git/add_files/#add-files-to-a-git-repository) or push an existing Git repository with the following command:
+Les fichiers disponibles sont ceux présents dans un dossier dont le chemin est passé en paramètre lors du lancement du serveur.
 
+### Get 
+Sur réception de la commande `Get <filename>` où `<filename>` est le nom d'un fichier, le serveur répond :
+
+  - `FileUnknown` si le nom du fichier est inconnu ;
+  - ou bien il transfert le fichier sous le format suivant :
+    - `Start`  
+    - puis le flux binaire correspondant au format du fichier
+
+Une fois qu'il a reçu soit la réponse `FileUnknown`, soit la totalité des octets attendus, le client envoie la réponse `OK`.
+
+Dans le cas où le contenu du fichier a été correctement reçu, le programme client doit créer un fichier du même nom dans le dossier de travail du processus et y sauver le contenu reçu.
+
+### End
+Sur réception de la commande `End`, le serveur déconnecte le client.
+
+
+## Liste des commandes, partie 2
+Le serveur écoute les connexions entrantes sur un second port. 
+Il accepte une seule connexion à la fois sur ce port. 
+Sur cette connexion de contrôle, il répond à la commande `List`, mais pas à la commande `Get`.
+Il doit répondre par ailleurs aux commandes ci-dessous.
+Dans un premier temps, simulez le client de contrôle en utilisant le programme `nc` (déjà utilisé dans les séances précédentes).
+Si vous avez le temps, vous pouvez ensuite en faire une implémentation.
+
+### Hide
+La commande `Hide <filename>` cache un fichier de la liste des fichiers disponbles. 
+Si aucun fichier existant ne porte le nom demandé, le serveur répond par `FileUnknown`. 
+Sinon, il supprime le fichier de la liste et confirme par `OK`.
+Attention, le fichier n'est pas supprimé du système de fichier, seulement caché (il n'apparaît plus dans la liste).
+
+### Reveal
+La commande `Reveal <filename>` révèle un fichier qui avait été préalablement caché. 
+Si le nom du fichier n'existe pas, la réponse est `FileUnknown`.
+Sinon, le fichier est à nouveau ajouté à la liste et le serveur confirme par `OK`.
+
+### Terminate
+La commande `Terminate` enclenche la terminaison du serveur. 
+Les réponses en cours aux commandes `List` et `Get` sont terminées (jusqu'à réception par le serveur de la confirmation), puis le serveur se déconnecte des clients. 
+Une fois l'ensemble des clients déconnectés, une confirmation `OK` est envoyée au client de contrôle, puis le processus serveur est arrêté.
+
+## Fonctionnalités optionnelles
+Les fonctionnalités ci-dessous sont optionnelles, vous pouvez les ajouter si vous avez le temps (dans l'ordre que vous voulez).
+
+### Servir une arborescence
+Au lieu de servir une simple liste de fichiers, le serveur propose aux clients une arborescence contenant des fichiers et des dossiers.
+Il faut adapter le protocole pour permettre aux clients (y compris le client de contrôle) de se _déplacer_ dans cette arborescence, pour pouvoir manipuler les fichiers.
+Les commandes `Hide` et `Reveal` peuvent être étendues pour cacher/réveler des dossiers.
+
+### Timeout
+Pour éviter de bloquer des ressources inutilement en cas de plantage d'un client ou du serveur, les opérations d'envoi/réception de message peuvent être modifiées pour intégrer un délai maximal qui pourra être passé en ligne de commande.
+Si une opération n'est pas réalisée dans le délai imparti, un message d'erreur est affiché dans les logs de l'application et la connexion est fermée.
+
+
+# Présentation de ce qui est fourni
+
+Pour démarrer le travail, vous partez du code fourni :
+  - un serveur qui accepte les connexions tcp sur le port `3333` de la machine hôte, et qui se déconnecte au bout de 10 secondes ;
+  - un client qui se connecte par défaut en tcp sur le port `3333` de la machine hôte, puis qui se termine.
+
+
+## Organisation de l'espace de travail 
+
+L'espace de travail est organisé comme suit :
+
+```bash
+.
+├── cmd
+│   ├── client
+│   │   └── main.go
+│   └── server
+│       └── main.go
+├── docs
+├── go.mod
+├── internal
+│   ├── app
+│   │   ├── client
+│   │   │   └── client.go
+│   │   └── server
+│   │       └── server.go
+│   └── pkg
+│       └── proto
+└── README.md
+
+11 directories, 6 files
 ```
-cd existing_repo
-git remote add origin https://gitlab.univ-nantes.fr/iutna.info2.r305/proj-groupe3/salou-moriceau-tonghatet.git
-git branch -M main
-git push -uf origin main
+
+Cette organisation s'appuie sur l'organisation décrite [https://github.com/golang-standards/project-layout/tree/master](ici).
+
+Le dossier `cmd` contient une première version des programmes principaux des deux commandes de la partie 1 : `server`, qui lance le serveur, et `client` qui lance le client.
+A priori vous n'avez pas de fichier à ajouter dans les dossiers `cmd/client` et `cmd/server`.
+Vous devrez modifier les fichiers `main.go` seulement si vous ajoutez des paramètres à vos commandes.
+
+Le dossier `internal/app` contient le code des applications.
+Le dossier `internal/app/client` contient le code relatif au client, et `internal/app/server` celui du serveur.
+Les noms des _packages_ correspondants sont `gitlab.univ-nantes.fr/iutna.info2.r305/proj/internal/app/client` et `iutna.r305/proj/internal/app/server`.
+Vous pouvez modifier les fichiers de ces dossiers ou en ajouter en fonction de vos besoins.
+
+Le dossier `internal/pkg` peut être utilisé pour ajouter du code qui serait commun aux deux applications. 
+À titre d'exemple, un dossier `proto` a été ajouté, dont le nom fait référence au protocole de communication entre client et serveur.
+Pour importer ce module, le nom a utilisé sera : `gitlab.univ-nantes.fr/iutna.info2.r305/internal/pkg/proto`.
+Une fois qu'un symbole a été ajouté, il faut utiliser la commande `go mod tidy` à la racine du projet pour mettre à jour les dépendances.
+Une fois que c'est fait, les symboles publics du modules (ceux dont le nom commence par une majuscule) peuvent ensuite être utilisés, par exemple : `proto.FooBar()`.
+
+
+## Construction des programmes
+
+Pour construire le serveur, se placer à la racine du projet et utiliser la commande suivante :
+
+```bash
+go build -C cmd/server
 ```
 
-## Integrate with your tools
+Si la construction réussit, le fichier exécutable `cmd/server/server` est créé.
 
-- [ ] [Set up project integrations](https://gitlab.univ-nantes.fr/iutna.info2.r305/proj-groupe3/salou-moriceau-tonghatet/-/settings/integrations)
+De la même façon, pour construire le client, se placer à la racine du projet et utiliser la commande suivante :
 
-## Collaborate with your team
+```bash
+go build -C cmd/client
+```
 
-- [ ] [Invite team members and collaborators](https://docs.gitlab.com/ee/user/project/members/)
-- [ ] [Create a new merge request](https://docs.gitlab.com/ee/user/project/merge_requests/creating_merge_requests.html)
-- [ ] [Automatically close issues from merge requests](https://docs.gitlab.com/ee/user/project/issues/managing_issues.html#closing-issues-automatically)
-- [ ] [Enable merge request approvals](https://docs.gitlab.com/ee/user/project/merge_requests/approvals/)
-- [ ] [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
+Si la construction réussit, le fichier exécutable `cmd/client/client` est créé.
 
-## Test and Deploy
-
-Use the built-in continuous integration in GitLab.
-
-- [ ] [Get started with GitLab CI/CD](https://docs.gitlab.com/ee/ci/quick_start/)
-- [ ] [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/ee/user/application_security/sast/)
-- [ ] [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/ee/topics/autodevops/requirements.html)
-- [ ] [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/ee/user/clusters/agent/)
-- [ ] [Set up protected environments](https://docs.gitlab.com/ee/ci/environments/protected_environments.html)
-
-***
-
-# Editing this README
-
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
-
-## Suggestions for a good README
-
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
-
-## Name
-Choose a self-explaining name for your project.
-
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
-
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
-
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
-
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
-
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
-
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
-
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
-
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
-
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
-
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
-
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
-
-## License
-For open source projects, say how it is licensed.
-
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.

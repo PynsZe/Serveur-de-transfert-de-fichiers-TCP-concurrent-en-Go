@@ -11,8 +11,7 @@ func parseArgs() (port *string, dir *string) {
 
 	logLevel := flag.Bool("d", false, "enable debug log level")
 	port = flag.String("p", "3333", "server port (default: 3333)")
-
-	dir = flag.String("p", ".", "directory with files to serve")
+	dir = flag.String("dir", ".", "directory with files to serve")
 
 	flag.Parse()
 

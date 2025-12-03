@@ -1,8 +1,11 @@
 package server
 
 import (
+	"bufio"
+	"io"
 	"log/slog"
 	"net"
+	"strings"
 	"time"
 )
 
@@ -42,6 +45,59 @@ func handleClient(c net.Conn, rootDir string){
 
 	/* boucle pour list get et end */
 	
-	time.Sleep(10*time.Second)
+	/* time.Sleep(10*time.Second) */
+
+	reader := bufio.NewReader(c)
+	writer := bufio.NewWriter(c)
+
+	for{
+		commandLine, err  := reader.ReadString('\n')
+		if err != nil{
+			if err != io.EOF{
+				slog.Error("N'a pas pu lire la commande" + err.Error())
+			}
+			break
+		}
+
+		commandLine = strings.TrimSpace(commandLine)
+		slog.Debug("Commande reçu :" + commandLine)
+
+		/* separe la commande du nom du fichier */
+	
+		partie := strings.Fields(commandLine)
+		if len(partie) == 0 {
+			slog.Info("C'est vide")
+			continue
+		}
+		commande := partie[0] /* commande */
+
+		/* commandes */
+
+		if command == "List"{
+			handleList(writer, reader, rootDir)
+		} else if commande == "Get"{
+			if len(partie) < 2{
+				slog.Warn("commande incomplete")
+				continue
+			}
+			filename := partie[1]  /* fichier */
+			handleGet(writer, reader, rootDir, filename)
+		} else if commande == "End"{
+			slog.Info("Client" + c.RemoteAddr().String() + "veut se deconnecter")
+		} else {
+			slog.Warn("command inconnue" + commandLine)
+			writer.WriteString("UnknownCommand\n")
+			writer.Flush()
+		}
+	
+	}
+
+}
+
+func handleList(w *bufio.Writer, r *bufio.Reader, pathDir string){
+
+}
+
+func handleGet(w *bufio.Writer, r *bufio.Reader, pathDir string, filename string){
 
 }

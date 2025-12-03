@@ -20,19 +20,28 @@ func RunServer(port *string, dir *string) {
 	slog.Debug("Now listening on port " + *port)
 	slog.Info("Files coming from directory" + *dir)
 
-	c, e := l.Accept()
-	if e != nil {
-		slog.Error(e.Error())
-		return
+	for {
+		c, e := l.Accept()
+		if e != nil {
+			slog.Error("Erreur, ne peut pas accepté" + e.Error())
+			continue
+		}
+		/* lancement d'une nouvelle go routine pour le client */
+		go handleClient(c, *dir)
 	}
-	defer func() {
-		c.Close()
-		slog.Info("Connection closed")
-	}()
+}
+
+/* fonction pour gérer les commandes  des tout les clients : list get et end  */
+
+func handleClient(c net.Conn, rootDir string){
 	slog.Info("Incoming connection from " + c.RemoteAddr().String())
+	defer func()  {
+		c.Close()
+		slog.Info("Connexion closed for" + c.RemoteAddr().String())
+	}()
+
+	/* boucle pour list get et end */
 	
+	time.Sleep(10*time.Second)
 
-	time.Sleep(10 * time.Second)
-
-	return
 }

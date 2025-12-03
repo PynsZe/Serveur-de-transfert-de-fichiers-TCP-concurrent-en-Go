@@ -38,7 +38,7 @@ func Run(remote string) {
 		if (err != nil){
 			slog.Error(e.Error())
 			return
-		}
+		}	
 		out.Flush()
 
 		if (line == "end"){

@@ -2,9 +2,11 @@ package server
 
 import (
 	"bufio"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
+	"os"
 	"strings"
 	"time"
 )
@@ -95,6 +97,54 @@ func handleClient(c net.Conn, rootDir string){
 }
 
 func handleList(w *bufio.Writer, r *bufio.Reader, pathDir string){
+
+	/* lecture  du contenue du dossier */
+
+	entre, err := os.ReadDir(pathDir)
+	if err != nil{
+		slog.Error("N'A PAS PU LIRE LE DOSSIER" + err.Error())
+		w.WriteString("FileCnt 0\n") /*  Envoi d'une liste vide pour ne pas bloquer le client. */
+		w.Flush()
+		return
+	}
+
+	/* preparation du message pour filecnt + comptage des fichiers  */
+	/* preparation d'une liste de messages de fichiers a envoyer */
+
+	messages := []string{}
+
+	for _, entree := range entre{
+		if entree.Type().IsRegular(){
+			info, _ := entree.Info()
+			ligneMess := fmt.Sprintf("%s %d\n", entree.Name(), info.Size())
+			messages = append(messages, ligneMess)
+		}
+	}
+
+	count := len(messages)
+
+	/* envoyer compteur filecnt x */
+
+	countMsg := fmt.Sprintf("FileCnt %d\n", count)
+	w.WriteString(countMsg)
+	slog.Debug("Serveur envoi: " + strings.TrimSpace(countMsg))
+
+	/* envoyer la liste detaillé */
+	
+	for _, msg := range messages{
+		w.WriteString(msg)
+		slog.Debug("Serveur envoi :" + strings.TrimSpace(msg))
+	}
+
+	w.Flush()
+	slog.Debug(fmt.Sprintf("%d fichiers listés et envoyés", count))
+	
+	ok, err := r.ReadString('\n')
+	if err != nil ||  strings.TrimSpace(ok) != "OK"{
+		slog.Error("LE CLIENT N'A PAS REPONDUS OK")
+		return
+	}
+	slog.Debug("Le client a validé la reception avec ok")
 
 }
 

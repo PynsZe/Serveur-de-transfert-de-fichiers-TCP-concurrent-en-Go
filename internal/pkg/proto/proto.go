@@ -29,12 +29,29 @@ func Parser(in string) (cmd string, flags []string, values []string, err bool){
 	}
 	cmd = parts[0]
 
+	// If there are no flags or values, return
 	if (count == 1){
 		return 
 	}
 
-	for i:=1; i<(count-1)/2; i++ {
-
+	// Extract flags and values
+	for i := 1; i < count; i++ {
+		part := parts[i]
+		// Regarder si le part est un flag
+		if strings.HasPrefix(part, "-") {
+			flags = append(flags, part)
+			// Verifier si la valeur associée au flag existe
+			if i+1 < count && !strings.HasPrefix(parts[i+1], "-") {
+				values = append(values, parts[i+1])
+				i++ // Passer le prochain part car c'est une valeur
+			} else {
+				values = append(values, "") // Aucune valeur associée au flag (-d)
+			}
+		} else {
+			// Si un part ne commence pas par '-', la commande est mal formée
+			err = true
+			return
+		}
 	}
 
 	return 

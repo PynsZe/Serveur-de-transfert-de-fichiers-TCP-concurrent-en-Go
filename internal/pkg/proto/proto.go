@@ -15,7 +15,7 @@ import (
 *  @return flags : les flags associés à la commande
 *  @return values : les valeurs associées aux flags
 *  @return err : true si la commande est mal formée, false sinon
- */
+*/
 func Parser(in string) (cmd string, flags []string, values []string, err bool){
 
 	// Split the input string into parts

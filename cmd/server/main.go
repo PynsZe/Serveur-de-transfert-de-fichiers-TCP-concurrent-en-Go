@@ -7,10 +7,12 @@ import (
 	"gitlab.univ-nantes.fr/iutna.info2.r305/proj/internal/app/server"
 )
 
-func parseArgs() (port *string) {
+func parseArgs() (port *string, dir *string) {
 
 	logLevel := flag.Bool("d", false, "enable debug log level")
 	port = flag.String("p", "3333", "server port (default: 3333)")
+
+	dir = flag.String("p", ".", "directory with files to serve")
 
 	flag.Parse()
 
@@ -23,6 +25,6 @@ func parseArgs() (port *string) {
 }
 
 func main() {
-	port := parseArgs()
-	server.RunServer(port)
+	port , dir := parseArgs()
+	server.RunServer(port, dir)
 }

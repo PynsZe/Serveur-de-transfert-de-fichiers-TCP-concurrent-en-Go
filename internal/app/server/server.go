@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-func RunServer(port *string) {
+func RunServer(port *string, dir *string) {
 
 	l, e := net.Listen("tcp", ":"+*port)
 	if e != nil {
@@ -18,6 +18,7 @@ func RunServer(port *string) {
 		slog.Debug("Stopped listening on port " + *port)
 	}()
 	slog.Debug("Now listening on port " + *port)
+	slog.Info("Files coming from directory" + *dir)
 
 	c, e := l.Accept()
 	if e != nil {
@@ -29,6 +30,7 @@ func RunServer(port *string) {
 		slog.Info("Connection closed")
 	}()
 	slog.Info("Incoming connection from " + c.RemoteAddr().String())
+	
 
 	time.Sleep(10 * time.Second)
 

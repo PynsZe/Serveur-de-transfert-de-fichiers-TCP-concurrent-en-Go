@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"path/filepath"
 	"strings"
 	//"time"
 )
@@ -23,7 +24,7 @@ func RunServer(port *string, dir *string) {
 		slog.Debug("Stopped listening on port " + *port)
 	}()
 	slog.Debug("Now listening on port " + *port)
-	slog.Info("Files coming from directory" + *dir)
+	slog.Info("Files coming from directory " + *dir)
 
 	for {
 		c, e := l.Accept()
@@ -86,6 +87,7 @@ func handleClient(c net.Conn, rootDir string){
 			handleGet(writer, reader, rootDir, filename)
 		} else if commande == "End"{
 			slog.Info("Client" + c.RemoteAddr().String() + "veut se deconnecter")
+			break
 		} else {
 			slog.Warn("command inconnue" + commandLine)
 			writer.WriteString("UnknownCommand\n")
@@ -149,5 +151,58 @@ func handleList(w *bufio.Writer, r *bufio.Reader, pathDir string){
 }
 
 func handleGet(w *bufio.Writer, r *bufio.Reader, pathDir string, filename string){
+
+	filePath := filepath.Join(pathDir, filename)
+	
+	/* ouverture du fichier */
+	file, err := os.Open(filePath)
+	if err != nil {
+		if os.IsNotExist(err){
+			slog.Warn("Fichier inconnue" + filename)
+			w.WriteString("FileUnknown\n")
+		} else {
+			slog.Error("Erreur lors de l'ouverture du fichier" + err.Error())
+			w.WriteString("ServerErreur\n")
+		}
+		w.Flush()
+		return
+	}
+
+	defer file.Close()
+
+	/* recuperer les infos pour le log  */
+	fileInfo, _ := file.Stat()
+	fileSize := fileInfo.Size()
+
+	/* envoie signal debut et données binaire  */
+	slog.Debug(fmt.Sprintf("Transfert de %s (%d octets)", filename, fileSize))
+
+	/* envoie du start */
+	w.WriteString("Start\n")
+	w.Flush()
+
+	/* copie du fichier vers le reseau */
+	n, err := io.Copy(w, file)
+	w.Flush()
+
+	if err != nil || n != fileSize{
+		slog.Error(
+		"Transfert incomplet ou échoué",
+        "fichier", filename,
+        "envoyé", n,
+        "attendu", fileSize,
+        "erreur", err)
+		return
+	}
+	slog.Debug(fmt.Sprintf("Transfert terminé %d octets envoyés", n))
+
+	/* attente du ok par le client */
+
+	ok, err := r.ReadString('\n')
+	if err != nil ||  strings.TrimSpace(ok) != "OK"{
+		slog.Error("LE CLIENT N'A PAS REPONDUS OK")
+		return
+	}
+	slog.Debug("Le client a validé la reception avec ok")
 
 }

@@ -15,23 +15,23 @@ import (
 *  @return flags : les flags associés à la commande
 *  @return values : les valeurs associées aux flags
 *  @return err : true si la commande est mal formée, false sinon
-*/
-func Parser(in string) (cmd string, flags []string, values []string, err bool){
+ */
+func Parser(in string) (cmd string, flags []string, values []string, err bool) {
 
 	// Split the input string into parts
 	parts := strings.Fields(in)
 	count := len(parts)
 
 	// Check if there is at least one part (the command)
-	if (count < 1) {
+	if count < 1 {
 		err = true
 		return
 	}
 	cmd = parts[0]
 
 	// If there are no flags or values, return
-	if (count == 1){
-		return 
+	if count == 1 {
+		return
 	}
 
 	// Extract flags and values
@@ -54,6 +54,6 @@ func Parser(in string) (cmd string, flags []string, values []string, err bool){
 		}
 	}
 
-	return 
+	return
 
 }

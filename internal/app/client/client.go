@@ -7,12 +7,15 @@ import (
 	"net"
 	"os"
 	"strings"
+
+	"gitlab.univ-nantes.fr/iutna.info2.r305/proj/internal/pkg/proto"
 )
+
 /**
 * La fonction Run permet de lancer le client
 *
 * @param remote : l'adresse du serveur distant
-*/
+ */
 func Run(remote string) {
 
 	c, e := net.Dial("tcp", remote)
@@ -25,9 +28,8 @@ func Run(remote string) {
 		c.Close()
 		slog.Debug("Connection closed")
 	}()
-	
-	slog.Info("Connected to " + c.RemoteAddr().String())
 
+	slog.Info("Connected to " + c.RemoteAddr().String())
 
 	in := bufio.NewReader(c)
 	out := bufio.NewWriter(c)
@@ -36,24 +38,28 @@ func Run(remote string) {
 	for {
 		fmt.Println("commande : ")
 		line, _ := stdin.ReadString('\n')
-        line = strings.TrimSpace(line)
-
+		line = strings.TrimSpace(line)
+		cmd, flags, values, _ := proto.Parser(line)
 		_, err := out.WriteString(line + "\n")
-		if (err != nil){
+		if err != nil {
 			slog.Error(e.Error())
 			return
-		}	
+		}
 		out.Flush()
-		switch line{
-			case "end":
-				slog.Info("Session closed by user")
-				return
-			case "List":
-				handleListClient(in,out)
-				return
+		switch cmd {
+		case "end":
+			slog.Info("Session closed by user")
+			return
+		case "List":
+			handleListClient(in, out)
+			return
+
+		case "Get":
+			handleGetClient(in, out, flags, values)
+			return
 		}
 		resp, err := in.ReadString('\n')
-		if (err != nil){
+		if err != nil {
 			slog.Error(e.Error())
 			return
 		}
@@ -67,10 +73,9 @@ func Run(remote string) {
 *
 * @param in : le reader pour lire les données du serveur
 * @param out : le writer pour envoyer des données au serveur
-*/
-func handleListClient(in *bufio.Reader,out *bufio.Writer) {
+ */
+func handleListClient(in *bufio.Reader, out *bufio.Writer) {
 	_, err := out.WriteString("List\n")
-	println(1)
 	if err != nil {
 		slog.Error("Erreur envoi OK : " + err.Error())
 		return
@@ -113,4 +118,7 @@ func handleListClient(in *bufio.Reader,out *bufio.Writer) {
 		return
 	}
 	out.Flush()
+}
+func handleGetClient(in *bufio.Reader, out *bufio.Writer, file []string, values []string) {
+	println(file, values)
 }

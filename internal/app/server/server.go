@@ -71,10 +71,20 @@ func RunServer(port *string, dir *string) {
 /* fonction pour gérer les commandes  des tout les clients : list get et end  */
 
 func handleClient(c net.Conn, rootDir string){
+
+	clientCountMux.Lock()
+    clientCount++
+    clientCountMux.Unlock()
+
 	slog.Info("Incoming connection from " + c.RemoteAddr().String())
 	defer func()  {
 		c.Close()
 		slog.Info("Connexion closed for" + c.RemoteAddr().String())
+
+		clientCountMux.Lock()
+        clientCount--
+        clientCountMux.Unlock()
+
 	}()
 
 	/* boucle pour list get et end */
@@ -242,4 +252,32 @@ func handleGet(w *bufio.Writer, r *bufio.Reader, pathDir string, filename string
 
 	slog.Debug("Le client a validé la reception avec ok")
 
+}
+
+func handleHide(w *bufio.Writer, r *bufio.Reader, pathDir string, filename string){
+
+	filePath := filepath.Join(pathDir, filename)
+	
+	/* ouverture du fichier */
+	file, err := os.Open(filePath)
+	if err != nil {
+		if os.IsNotExist(err){
+			slog.Warn("Fichier inconnue" + filename)
+			w.WriteString("FileUnknown\n")
+		} else {
+			slog.Error("Erreur lors de l'ouverture du fichier" + err.Error())
+			w.WriteString("ServerErreur\n")
+		}
+		w.Flush()
+		return
+	}
+
+
+
+}
+
+func handleReveal(w *bufio.Writer, r *bufio.Reader, pathDir string, filename string){
+}
+
+func handleTerminate(w *bufio.Writer, r *bufio.Reader){
 }

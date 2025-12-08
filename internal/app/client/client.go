@@ -133,7 +133,7 @@ func handleGetClient(in *bufio.Reader, out *bufio.Writer, pathDir string, file s
 	slog.Debug("Demande de téléchargement du fichier : " + file)
 
 	// Lecture de la réponse du serveur
-	// Header : Start 
+	// Header : Start
 	header, err := in.ReadString('\n')
 	if err != nil {
 		slog.Error("Erreur réception FileSize : " + err.Error())
@@ -176,7 +176,7 @@ func handleGetClient(in *bufio.Reader, out *bufio.Writer, pathDir string, file s
 	}
 
 	fmt.Printf("Fichier %s téléchargé (%d octets)\n", file, count)
-		
+
 	// Une fois la liste reçue → envoyer OK
 	fmt.Println("→ Envoi OK")
 	_, err = out.WriteString("OK\n")

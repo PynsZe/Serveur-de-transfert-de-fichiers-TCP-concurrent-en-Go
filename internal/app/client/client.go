@@ -59,7 +59,12 @@ func Run(remote string) {
 }
 
 func handleListClient(in *bufio.Reader,out *bufio.Writer) {
-
+	_, err := out.WriteString("List\n")
+	println(1)
+	if err != nil {
+		slog.Error("Erreur envoi OK : " + err.Error())
+		return
+	}
 	// Lecture de "FileCnt X"
 	header, err := in.ReadString('\n')
 	if err != nil {

@@ -20,6 +20,9 @@ var (
 	clientCountMux sync.Mutex // Mutex pour protéger clientCount
 	hiddenFiles    map[string]bool // map[filename] -> true (caché)
     hiddenFilesMux sync.Mutex // Mutex pour protéger hiddenFiles
+	terminateChan chan struct{} // Canal utilisé pour signaler l'arrêt à RunServer
+    serverWG      sync.WaitGroup // Pour attendre la fin de RunServer
+    clientWG      sync.WaitGroup // Pour attendre que tous les handleClient se terminent
 )
 
 
@@ -48,6 +51,9 @@ func RunServer(port *string, dir *string) {
         hiddenFiles = make(map[string]bool)
     }
 
+	terminateChan = make(chan struct{}) 
+    serverWG.Add(1) // Le serveur principal doit être attendu
+
 	l, e := net.Listen("tcp", ":"+*port)
 	if e != nil {
 		slog.Error(e.Error())
@@ -55,6 +61,7 @@ func RunServer(port *string, dir *string) {
 	}
 	defer func() {
 		l.Close()
+		serverWG.Done() // Indiquer que RunServer est terminé
 		slog.Debug("Stopped listening on port " + *port)
 	}()
 	slog.Debug("Now listening on port " + *port)
@@ -64,13 +71,26 @@ func RunServer(port *string, dir *string) {
 	go displayClientCount()
 
 	for {
-		c, e := l.Accept()
-		if e != nil {
-			slog.Error("Erreur, ne peut pas accepté" + e.Error())
-			continue
-		}
-		/* lancement d'une nouvelle go routine pour le client */
-		go handleClient(c, *dir)
+		select {
+        case <-terminateChan:
+            // Signal reçu, arrêter d'accepter de nouvelles connexions
+            slog.Info("Signal de TERMINATE reçu. Arrêt de l'écoute.")
+            return 
+        default:
+            // Si pas de signal, continue à accepter
+            c, e := l.Accept()
+            if e != nil {
+                // Si l'erreur est due à la fermeture de l'écoute, on sort
+                if strings.Contains(e.Error(), "erreur est due à la fermeture de l'écoute") {
+                    return 
+                }
+                slog.Error("Erreur, ne peut pas accepté" + e.Error())
+                continue
+            }
+            /* lancement d'une nouvelle go routine pour le client */
+            clientWG.Add(1) //  Incrémenter le WaitGroup avant de lancer la goroutine
+            go handleClient(c, *dir)
+        }
 	}
 }
 
@@ -91,6 +111,7 @@ func handleClient(c net.Conn, rootDir string){
         clientCount--
         clientCountMux.Unlock()
 
+		clientWG.Done() // Indiquer que cette goroutine est terminée
 	}()
 
 	/* boucle pour list get et end */
@@ -132,7 +153,28 @@ func handleClient(c net.Conn, rootDir string){
 			}
 			filename := partie[1]  /* fichier */
 			handleGet(writer, reader, rootDir, filename)
-		} else if commande == "End"{
+		} else if commande == "Hide"{
+            if len(partie) < 2{
+                slog.Warn("commande incomplete: Hide")
+                writer.WriteString("CommandIncomplete\n")
+                writer.Flush()
+                continue
+            }
+            filename := partie[1]
+            handleHide(writer, reader, rootDir, filename)
+        } else if commande == "Reveal"{
+            if len(partie) < 2{
+                slog.Warn("commande incomplete: Reveal")
+                writer.WriteString("CommandIncomplete\n")
+                writer.Flush()
+                continue
+            }
+            filename := partie[1]
+            handleReveal(writer, reader, rootDir, filename)
+		} else if commande == "Terminate"{ 
+            handleTerminate(writer, reader) 
+            return 
+        } else if commande == "End"{
 			slog.Info("Client" + c.RemoteAddr().String() + "veut se deconnecter")
 			break
 		} else {
@@ -140,7 +182,6 @@ func handleClient(c net.Conn, rootDir string){
 			writer.WriteString("UnknownCommand\n")
 			writer.Flush()
 		}
-	
 	}
 
 }
@@ -327,4 +368,24 @@ func handleReveal(w *bufio.Writer, r *bufio.Reader, pathDir string, filename str
 }
 
 func handleTerminate(w *bufio.Writer, r *bufio.Reader){
+    
+    slog.Warn("COMMANDE TERMINATE REÇUE. Début de l'arrêt ordonné.")
+
+    // Stopper l'écoute de RunServer
+    close(terminateChan)
+	slog.Info("Arrêt de l'écoute des nouvelles connexions.")
+
+    // Attend que tous les clients actifs terminent leurs commandes et se déconnectent.
+    clientWG.Wait()
+    slog.Info("Tous les clients sont déconnectés. Serveur arrêté.")
+
+    //Envoie la confirmation au client de contrôle
+    w.WriteString("OK\n")
+    w.Flush()
+    
+    // Arrêt du processus
+    serverWG.Wait() 
+    
+    slog.Info("Processus serveur terminé.")
+    os.Exit(0) // Arrêter le processus Go
 }

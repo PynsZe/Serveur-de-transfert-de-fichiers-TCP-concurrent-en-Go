@@ -38,7 +38,7 @@ func Run(remote string) {
 	for {
 		fmt.Println("> ")
 		line, err := stdin.ReadString('\n')
-		if (err!=nil) {
+		if err != nil {
 			slog.Error(e.Error())
 		}
 		line = strings.TrimSpace(line)
@@ -59,6 +59,8 @@ func Run(remote string) {
 		case "Get":
 			handleGetClient(in, out, values[0])
 			return
+		case "Hide":
+			handleHideClient()
 		}
 		resp, err := in.ReadString('\n')
 		if err != nil {
@@ -167,4 +169,13 @@ func handleGetClient(in *bufio.Reader, out *bufio.Writer, file string) {
 	}
 
 	fmt.Printf("Fichier %s téléchargé (%d octets)\n", file, count)
+}
+func handleHideClient() {
+
+}
+func handleRevealClient() {
+
+}
+func handleTerminateClient() {
+
 }

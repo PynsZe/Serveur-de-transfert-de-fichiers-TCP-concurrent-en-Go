@@ -130,7 +130,7 @@ func handleClient(c net.Conn, rootDir string){
 			slog.Info("Client" + c.RemoteAddr().String() + "veut se deconnecter")
 			break
 		} else {
-			slog.Warn("command inconnue" + commandLine)
+			slog.Warn("command inconnue " + commandLine)
 			writer.WriteString("UnknownCommand\n")
 			writer.Flush()
 		}
@@ -271,6 +271,7 @@ func handleHide(w *bufio.Writer, r *bufio.Reader, pathDir string, filename strin
 		w.Flush()
 		return
 	}
+	_ = file // pour pas que go me les brisent
 
 
 

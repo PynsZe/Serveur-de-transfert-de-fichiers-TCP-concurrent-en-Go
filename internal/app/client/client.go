@@ -36,11 +36,14 @@ func Run(remote string) {
 	stdin := bufio.NewReader(os.Stdin)
 
 	for {
-		fmt.Println("commande : ")
-		line, _ := stdin.ReadString('\n')
+		fmt.Println("> ")
+		line, err := stdin.ReadString('\n')
+		if (err!=nil) {
+			slog.Error(e.Error())
+		}
 		line = strings.TrimSpace(line)
 		cmd, flags, values, _ := proto.Parser(line)
-		_, err := out.WriteString(line + "\n")
+		_, err = out.WriteString(line + "\n")
 		if err != nil {
 			slog.Error(e.Error())
 			return
@@ -100,6 +103,7 @@ func handleListClient(in *bufio.Reader, out *bufio.Writer) {
 	var count int
 	fmt.Sscanf(parts[1], "%d", &count)
 
+	slog.Debug("LECTURE DES FICHIER ENVOYEES PAR LE SERVEUR")
 	// Lecture des X lignes suivantes
 	for i := 0; i < count; i++ {
 		line, err := in.ReadString('\n')

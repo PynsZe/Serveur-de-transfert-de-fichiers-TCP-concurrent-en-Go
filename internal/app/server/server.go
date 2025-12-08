@@ -18,6 +18,8 @@ import (
 var (
 	clientCount    int
 	clientCountMux sync.Mutex // Mutex pour protéger clientCount
+	hiddenFiles    map[string]bool // map[filename] -> true (caché)
+    hiddenFilesMux sync.Mutex // Mutex pour protéger hiddenFiles
 )
 
 
@@ -41,6 +43,10 @@ func displayClientCount() {
 }
 
 func RunServer(port *string, dir *string) {
+
+	if hiddenFiles == nil {
+        hiddenFiles = make(map[string]bool)
+    }
 
 	l, e := net.Listen("tcp", ":"+*port)
 	if e != nil {
@@ -257,6 +263,33 @@ func handleGet(w *bufio.Writer, r *bufio.Reader, pathDir string, filename string
 func handleHide(w *bufio.Writer, r *bufio.Reader, pathDir string, filename string){
 
 	filePath := filepath.Join(pathDir, filename)
+	// Vérifie l'existence et le type du fichier
+	fileInfo, err := os.Stat(filePath)
+
+	if os.IsNotExist(err) || err != nil || !fileInfo.Mode().IsRegular() {
+        slog.Warn("Tentative de cacher un fichier inconnu ou non régulier: " + filename)
+        w.WriteString("FileUnknown\n")
+        w.Flush()
+        return
+    }
+
+    //Ajoute le fichier a la liste des fichiers cachés
+    hiddenFilesMux.Lock()
+    defer hiddenFilesMux.Unlock()
+
+    if _, alreadyHidden := hiddenFiles[filename]; !alreadyHidden {
+        hiddenFiles[filename] = true
+        slog.Info("Fichier caché: " + filename)
+    }
+
+    // Répondre OK
+    w.WriteString("OK\n")
+    w.Flush()
+}
+
+func handleReveal(w *bufio.Writer, r *bufio.Reader, pathDir string, filename string){
+
+	filePath := filepath.Join(pathDir, filename)
 	
 	/* ouverture du fichier */
 	file, err := os.Open(filePath)
@@ -270,13 +303,10 @@ func handleHide(w *bufio.Writer, r *bufio.Reader, pathDir string, filename strin
 		}
 		w.Flush()
 		return
+	} else {
+
 	}
 
-
-
-}
-
-func handleReveal(w *bufio.Writer, r *bufio.Reader, pathDir string, filename string){
 }
 
 func handleTerminate(w *bufio.Writer, r *bufio.Reader){

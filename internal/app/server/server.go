@@ -153,7 +153,28 @@ func handleClient(c net.Conn, rootDir string){
 			}
 			filename := partie[1]  /* fichier */
 			handleGet(writer, reader, rootDir, filename)
-		} else if commande == "End"{
+		} else if commande == "Hide"{
+            if len(partie) < 2{
+                slog.Warn("commande incomplete: Hide")
+                writer.WriteString("CommandIncomplete\n")
+                writer.Flush()
+                continue
+            }
+            filename := partie[1]
+            handleHide(writer, reader, rootDir, filename)
+        } else if commande == "Reveal"{
+            if len(partie) < 2{
+                slog.Warn("commande incomplete: Reveal")
+                writer.WriteString("CommandIncomplete\n")
+                writer.Flush()
+                continue
+            }
+            filename := partie[1]
+            handleReveal(writer, reader, rootDir, filename)
+		} else if commande == "Terminate"{ 
+            handleTerminate(writer, reader) 
+            return 
+        } else if commande == "End"{
 			slog.Info("Client" + c.RemoteAddr().String() + "veut se deconnecter")
 			break
 		} else {
@@ -161,7 +182,6 @@ func handleClient(c net.Conn, rootDir string){
 			writer.WriteString("UnknownCommand\n")
 			writer.Flush()
 		}
-	
 	}
 
 }
@@ -293,26 +313,8 @@ func handleGet(w *bufio.Writer, r *bufio.Reader, pathDir string, filename string
 func handleHide(w *bufio.Writer, r *bufio.Reader, pathDir string, filename string){
 
 	filePath := filepath.Join(pathDir, filename)
-<<<<<<< HEAD
-	
-	/* ouverture du fichier */
-	file, err := os.Open(filePath)
-	if err != nil {
-		if os.IsNotExist(err){
-			slog.Warn("Fichier inconnue" + filename)
-			w.WriteString("FileUnknown\n")
-		} else {
-			slog.Error("Erreur lors de l'ouverture du fichier" + err.Error())
-			w.WriteString("ServerErreur\n")
-		}
-		w.Flush()
-		return
-	}
-	_ = file // pour pas que go me les brisent
-=======
 	// Vérifie l'existence et le type du fichier
 	fileInfo, err := os.Stat(filePath)
->>>>>>> refs/remotes/origin/main
 
 	if os.IsNotExist(err) || err != nil || !fileInfo.Mode().IsRegular() {
         slog.Warn("Tentative de cacher un fichier inconnu ou non régulier: " + filename)

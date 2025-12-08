@@ -1,67 +1,40 @@
 package proto
 
 import (
+	"fmt"
 	"strings"
 )
 
 /**
-*  La fonction Parser permet de parser une commande reçue
-*  Elle retourne la commande, les flags et les valeurs associées
-*  ainsi qu'une erreur si la commande est mal formée
+* La fonction Parser permet d'analyser une commande entrée par l'utilisateur
+* et de la décomposer en commande et valeur(s) associée(s)
 *
-*  @param in : la commande reçue
-*
-*  @return cmd : la commande
-*  @return flags : les flags associés à la commande
-*  @return values : les valeurs associées aux flags
-*  @return err : true si la commande est mal formée, false sinon
+* @param in : la commande entrée par l'utilisateur
+* @return cmd : la commande extraite
+* @return values : les valeurs associées à la commande
+* @return err : une erreur si la commande est mal formée, nil sinon
  */
-func Parser(in string) (cmd string, flags []string, values []string, err bool) {
 
-	// Split the input string into parts
+func Parse(in string) (cmd string, values string, err error) {
 	parts := strings.Fields(in)
-	count := len(parts)
 
-	// Check if there is at least one part (the command)
-	if count < 1 {
-		err = true
-		return
-	}
-	cmd = parts[0]
+	switch len(parts) {
+	case 0:
+		return "", "", fmt.Errorf("empty input")
 
-	// If there are no flags or values, return
-	if count == 1 {
-		return
-	}
-
-	if (cmd == "Get"){
-		if (len(parts) != 2){
-			err = true
-			return 
+	case 1:
+		if parts[0] == "Get" {
+			return "", "", fmt.Errorf("'Get' requires a value")
 		}
-		values = append(values, parts[0])
-	}
+		return parts[0], "", nil
 
-	// Extract flags and values
-	for i := 1; i < count; i++ {
-		part := parts[i]
-		// Regarder si le part est un flag
-		if strings.HasPrefix(part, "-") {
-			flags = append(flags, part)
-			// Verifier si la valeur associée au flag existe
-			if i+1 < count && !strings.HasPrefix(parts[i+1], "-") {
-				values = append(values, parts[i+1])
-				i++ // Passer le prochain part car c'est une valeur
-			} else {
-				values = append(values, "") // Aucune valeur associée au flag (-d)
-			}
-		} else {
-			// Si un part ne commence pas par '-', la commande est mal formée
-			err = true
-			return
+	case 2:
+		if parts[0] == "Get" {
+			return "Get", parts[1], nil
 		}
+		return "", "", fmt.Errorf("unknown 2-part command")
+
+	default:
+		return "", "", fmt.Errorf("invalid input format")
 	}
-
-	return
-
 }

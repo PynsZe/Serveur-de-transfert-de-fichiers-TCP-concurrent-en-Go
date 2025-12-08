@@ -248,6 +248,9 @@ func handleList(w *bufio.Writer, r *bufio.Reader, pathDir string){
 }
 
 func handleGet(w *bufio.Writer, r *bufio.Reader, pathDir string, filename string){
+	// TODO () : gérer les erreurs et les fichiers cachés
+	// TODO () : gérer les erreurs de path pas existants
+	// TODO () : gérer l'enregistrement des fichiers dans le repo voulu
 
 	filePath := filepath.Join(pathDir, filename)
 	

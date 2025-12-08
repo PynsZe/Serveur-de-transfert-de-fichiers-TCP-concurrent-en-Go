@@ -16,7 +16,7 @@ import (
 *
 * @param remote : l'adresse du serveur distant
  */
-func Run(remote string) {
+func Run(remote string, dir *string) {
 
 	c, e := net.Dial("tcp", remote)
 	if e != nil {
@@ -36,38 +36,46 @@ func Run(remote string) {
 	stdin := bufio.NewReader(os.Stdin)
 
 	for {
-		fmt.Println("> ")
+		fmt.Print("> ")
+
 		line, err := stdin.ReadString('\n')
 		if err != nil {
-			slog.Error(e.Error())
+			slog.Error(err.Error())
 		}
-		line = strings.TrimSpace(line)
-		cmd, _, values, _ := proto.Parser(line)
-		_, err = out.WriteString(line + "\n")
-		if err != nil {
-			slog.Error(e.Error())
-			return
+
+		cmd, value, parsErr := proto.Parse(strings.TrimSpace(line))
+		if parsErr != nil {
+			slog.Error("Malformed command, error : " + parsErr.Error())
+			continue
 		}
-		out.Flush()
+
+		switch cmd {
+		case "End", "List", "Get":
+			_, err = out.WriteString(line + "\n")
+			if err != nil {
+				slog.Error(err.Error())
+				return
+			}
+			out.Flush()
+		default:
+			slog.Warn("Unknown command: " + cmd)
+			continue
+		}
+
 		switch cmd {
 		case "End":
 			slog.Info("Session closed by user")
 			return
 
 		case "List":
+			slog.Debug("Sending command: " + cmd + " " + value)
 			handleListClient(in, out)
 
 		case "Get":
-			handleGetClient(in, out, ".", values[0])
+			slog.Debug("Sending command: " + cmd + " " + value)
+			handleGetClient(in, out, *dir, value)
 
 		}
-		resp, err := in.ReadString('\n')
-		if err != nil {
-			slog.Error(e.Error())
-			return
-		}
-
-		fmt.Println(resp)
 	}
 }
 
@@ -76,7 +84,7 @@ func Run(remote string) {
 *
 * @param in : le reader pour lire les données du serveur
 * @param out : le writer pour envoyer des données au serveur
- */
+*/
 func handleListClient(in *bufio.Reader, out *bufio.Writer) {
 	// Lecture de "FileCnt X"
 	header, err := in.ReadString('\n')
@@ -110,7 +118,7 @@ func handleListClient(in *bufio.Reader, out *bufio.Writer) {
 	}
 
 	// Une fois la liste reçue → envoyer OK
-	fmt.Println("→ Envoi OK")
+	slog.Debug("→ Envoi OK")
 	_, err = out.WriteString("OK\n")
 	if err != nil {
 		slog.Error("Erreur envoi OK : " + err.Error())
@@ -121,7 +129,7 @@ func handleListClient(in *bufio.Reader, out *bufio.Writer) {
 
 func handleGetClient(in *bufio.Reader, out *bufio.Writer, pathDir string, file string) {
 	//commence la recuperation du fichier.
-	fmt.Println("→ Demande de téléchargement du fichier : " + file)
+	fmt.Println("→ Demande de téléchargement du fichier : " + file + " dans le répertoire " + pathDir)
 	slog.Debug("Demande de téléchargement du fichier : " + file)
 
 	// Lecture de la réponse du serveur
@@ -147,7 +155,7 @@ func handleGetClient(in *bufio.Reader, out *bufio.Writer, pathDir string, file s
 	fmt.Sscanf(fileSize, "%d", &count)
 
 	// Ouvrir le fichier en écriture
-	f, err := os.Create(file + "download.txt")
+	f, err := os.Create(file)
 	if err != nil {
 		slog.Error("Erreur création fichier : " + err.Error())
 		return

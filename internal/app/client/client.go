@@ -42,7 +42,7 @@ func Run(remote string) {
 			slog.Error(e.Error())
 		}
 		line = strings.TrimSpace(line)
-		cmd, flags, values, _ := proto.Parser(line)
+		cmd, _, values, _ := proto.Parser(line)
 		_, err = out.WriteString(line + "\n")
 		if err != nil {
 			slog.Error(e.Error())
@@ -55,10 +55,9 @@ func Run(remote string) {
 			return
 		case "List":
 			handleListClient(in, out)
-			return
 
 		case "Get":
-			handleGetClient(in, out, flags, values)
+			handleGetClient(in, out, values[0])
 			return
 		}
 		resp, err := in.ReadString('\n')
@@ -78,11 +77,6 @@ func Run(remote string) {
 * @param out : le writer pour envoyer des données au serveur
  */
 func handleListClient(in *bufio.Reader, out *bufio.Writer) {
-	_, err := out.WriteString("List\n")
-	if err != nil {
-		slog.Error("Erreur envoi OK : " + err.Error())
-		return
-	}
 	// Lecture de "FileCnt X"
 	header, err := in.ReadString('\n')
 	if err != nil {
@@ -123,6 +117,54 @@ func handleListClient(in *bufio.Reader, out *bufio.Writer) {
 	}
 	out.Flush()
 }
-func handleGetClient(in *bufio.Reader, out *bufio.Writer, file []string, values []string) {
-	println(file, values)
+
+func handleGetClient(in *bufio.Reader, out *bufio.Writer, file string) {
+	//commence la recuperation du fichier.
+	fmt.Println("→ Demande de téléchargement du fichier : " + file)
+	slog.Debug("Demande de téléchargement du fichier : " + file)
+
+	// Lecture de la réponse du serveur
+	// Header : Start 
+	header, err := in.ReadString('\n')
+	if err != nil {
+		slog.Error("Erreur réception FileSize : " + err.Error())
+		return
+	}
+	header = strings.TrimSpace(header)
+	fmt.Println(header)
+
+	// Lecture de la taille du fichier
+	fileSize, err := in.ReadString('\n')
+	if err != nil {
+		slog.Error("Erreur réception FileSize : " + err.Error())
+		return
+	}
+	fileSize = strings.TrimSpace(fileSize)
+	fmt.Println("→ Taille du fichier : " + fileSize)
+
+	var count int
+	fmt.Sscanf(fileSize, "%d", &count)
+
+	// Ouvrir le fichier en écriture
+	f, err := os.Create(file)
+	if err != nil {
+		slog.Error("Erreur création fichier : " + err.Error())
+		return
+	}
+	defer f.Close()
+
+	// Lire les données du fichier
+	receivedBytes := 0
+	buffer := make([]byte, 1024)
+	for receivedBytes < count {
+		n, err := in.Read(buffer)
+		if err != nil {
+			slog.Error("Erreur lecture données fichier : " + err.Error())
+			return
+		}
+		f.Write(buffer[:n])
+		receivedBytes += n
+	}
+
+	fmt.Printf("Fichier %s téléchargé (%d octets)\n", file, count)
 }

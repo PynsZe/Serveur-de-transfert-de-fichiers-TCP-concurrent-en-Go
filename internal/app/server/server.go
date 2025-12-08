@@ -235,6 +235,7 @@ func handleGet(w *bufio.Writer, r *bufio.Reader, pathDir string, filename string
 
 	/* envoie du start */
 	w.WriteString("Start\n")
+	w.WriteString(fmt.Sprintf("%d\n", fileSize))
 	w.Flush()
 
 	/* copie du fichier vers le reseau */
@@ -266,32 +267,13 @@ func handleGet(w *bufio.Writer, r *bufio.Reader, pathDir string, filename string
         "client", file.Name())
 
 	slog.Debug("Le client a validé la reception avec ok")
-
 }
 
 func handleHide(w *bufio.Writer, r *bufio.Reader, pathDir string, filename string){
 
 	filePath := filepath.Join(pathDir, filename)
-<<<<<<< HEAD
-	
-	/* ouverture du fichier */
-	file, err := os.Open(filePath)
-	if err != nil {
-		if os.IsNotExist(err){
-			slog.Warn("Fichier inconnue" + filename)
-			w.WriteString("FileUnknown\n")
-		} else {
-			slog.Error("Erreur lors de l'ouverture du fichier" + err.Error())
-			w.WriteString("ServerErreur\n")
-		}
-		w.Flush()
-		return
-	}
-	_ = file // pour pas que go me les brisent
-=======
 	// Vérifie l'existence et le type du fichier
 	fileInfo, err := os.Stat(filePath)
->>>>>>> refs/remotes/origin/main
 
 	if os.IsNotExist(err) || err != nil || !fileInfo.Mode().IsRegular() {
         slog.Warn("Tentative de cacher un fichier inconnu ou non régulier: " + filename)

@@ -38,7 +38,7 @@ func Run(remote string) {
 	for {
 		fmt.Println("> ")
 		line, err := stdin.ReadString('\n')
-		if (err!=nil) {
+		if err != nil {
 			slog.Error(e.Error())
 		}
 		line = strings.TrimSpace(line)
@@ -60,6 +60,8 @@ func Run(remote string) {
 		case "Get":
 			handleGetClient(in, out, flags, values)
 			return
+		case "Hide":
+			handleHideClient()
 		}
 		resp, err := in.ReadString('\n')
 		if err != nil {
@@ -78,11 +80,7 @@ func Run(remote string) {
 * @param out : le writer pour envoyer des données au serveur
  */
 func handleListClient(in *bufio.Reader, out *bufio.Writer) {
-	_, err := out.WriteString("List\n")
-	if err != nil {
-		slog.Error("Erreur envoi OK : " + err.Error())
-		return
-	}
+
 	// Lecture de "FileCnt X"
 	header, err := in.ReadString('\n')
 	if err != nil {
@@ -125,4 +123,13 @@ func handleListClient(in *bufio.Reader, out *bufio.Writer) {
 }
 func handleGetClient(in *bufio.Reader, out *bufio.Writer, file []string, values []string) {
 	println(file, values)
+}
+func handleHideClient() {
+
+}
+func handleRevealClient() {
+
+}
+func handleTerminateClient() {
+
 }

@@ -50,17 +50,16 @@ func Run(remote string) {
 		}
 		out.Flush()
 		switch cmd {
-		case "end":
+		case "End":
 			slog.Info("Session closed by user")
 			return
+
 		case "List":
 			handleListClient(in, out)
 
 		case "Get":
-			handleGetClient(in, out, values[0])
-			return
-		case "Hide":
-			handleHideClient()
+			handleGetClient(in, out, ".", values[0])
+
 		}
 		resp, err := in.ReadString('\n')
 		if err != nil {
@@ -120,7 +119,7 @@ func handleListClient(in *bufio.Reader, out *bufio.Writer) {
 	out.Flush()
 }
 
-func handleGetClient(in *bufio.Reader, out *bufio.Writer, file string) {
+func handleGetClient(in *bufio.Reader, out *bufio.Writer, pathDir string, file string) {
 	//commence la recuperation du fichier.
 	fmt.Println("→ Demande de téléchargement du fichier : " + file)
 	slog.Debug("Demande de téléchargement du fichier : " + file)
@@ -148,7 +147,7 @@ func handleGetClient(in *bufio.Reader, out *bufio.Writer, file string) {
 	fmt.Sscanf(fileSize, "%d", &count)
 
 	// Ouvrir le fichier en écriture
-	f, err := os.Create(file)
+	f, err := os.Create(file + "download.txt")
 	if err != nil {
 		slog.Error("Erreur création fichier : " + err.Error())
 		return
@@ -169,13 +168,13 @@ func handleGetClient(in *bufio.Reader, out *bufio.Writer, file string) {
 	}
 
 	fmt.Printf("Fichier %s téléchargé (%d octets)\n", file, count)
-}
-func handleHideClient() {
-
-}
-func handleRevealClient() {
-
-}
-func handleTerminateClient() {
-
+		
+	// Une fois la liste reçue → envoyer OK
+	fmt.Println("→ Envoi OK")
+	_, err = out.WriteString("OK\n")
+	if err != nil {
+		slog.Error("Erreur envoi OK : " + err.Error())
+		return
+	}
+	out.Flush()
 }

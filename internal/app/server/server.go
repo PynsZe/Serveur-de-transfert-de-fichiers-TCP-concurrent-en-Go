@@ -9,8 +9,36 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	//"time"
+	"sync"
+	"time"
 )
+
+/* etat global du serveur */
+
+var (
+	clientCount    int
+	clientCountMux sync.Mutex // Mutex pour protéger clientCount
+)
+
+
+/* compteur pour le nombre de client connecté */
+const CountClient = 1 * time.Second
+
+/* compteur en temps reel*/
+func displayClientCount() {
+	for {
+	
+		clientCountMux.Lock()
+		currentCount := clientCount
+		clientCountMux.Unlock()
+
+		// Afficher le compte actuel
+		slog.Info(fmt.Sprintf("Clients connectés: %d", currentCount))
+
+		// Attendre 
+		time.Sleep(CountClient)
+	}
+}
 
 func RunServer(port *string, dir *string) {
 
@@ -25,6 +53,9 @@ func RunServer(port *string, dir *string) {
 	}()
 	slog.Debug("Now listening on port " + *port)
 	slog.Info("Files coming from directory " + *dir)
+
+	/* compteur mis en route */
+	go displayClientCount()
 
 	for {
 		c, e := l.Accept()
@@ -203,6 +234,12 @@ func handleGet(w *bufio.Writer, r *bufio.Reader, pathDir string, filename string
 		slog.Error("LE CLIENT N'A PAS REPONDUS OK")
 		return
 	}
+
+	slog.Info("Fichier téléchargé", 
+        "nom", filename, 
+        "taille", n,
+        "client", file.Name())
+
 	slog.Debug("Le client a validé la reception avec ok")
 
 }

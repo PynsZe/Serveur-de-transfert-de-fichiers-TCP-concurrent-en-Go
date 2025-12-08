@@ -8,7 +8,11 @@ import (
 	"os"
 	"strings"
 )
-
+/**
+* La fonction Run permet de lancer le client
+*
+* @param remote : l'adresse du serveur distant
+*/
 func Run(remote string) {
 
 	c, e := net.Dial("tcp", remote)
@@ -58,6 +62,12 @@ func Run(remote string) {
 	}
 }
 
+/*
+* La fonction handleListClient permet de gérer la commande List côté client
+*
+* @param in : le reader pour lire les données du serveur
+* @param out : le writer pour envoyer des données au serveur
+*/
 func handleListClient(in *bufio.Reader,out *bufio.Writer) {
 	_, err := out.WriteString("List\n")
 	println(1)

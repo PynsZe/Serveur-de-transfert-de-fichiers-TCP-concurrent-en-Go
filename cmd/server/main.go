@@ -7,6 +7,7 @@ import (
 	"gitlab.univ-nantes.fr/iutna.info2.r305/proj/internal/app/server"
 )
 
+const AdminPort = "4444" // J'utilise 4444 pour éviter les ports privilégiés (<1024)
 func parseArgs() (port *string, dir *string) {
 
 	logLevel := flag.Bool("d", false, "enable debug log level")
@@ -24,6 +25,10 @@ func parseArgs() (port *string, dir *string) {
 }
 
 func main() {
-	port , dir := parseArgs()
+	port, dir := parseArgs()
+	// Lancement du listener des commandes d'administration sur le port 4444 en arrière-plan
+	go server.RunAdminServer(AdminPort, *dir)
+
+	// Le serveur principal s'exécute sur le thread principal
 	server.RunServer(port, dir)
 }

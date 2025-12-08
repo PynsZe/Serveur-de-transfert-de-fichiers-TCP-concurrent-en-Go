@@ -34,6 +34,14 @@ func Parser(in string) (cmd string, flags []string, values []string, err bool) {
 		return
 	}
 
+	if (cmd == "Get"){
+		if (len(parts) != 2){
+			err = true
+			return 
+		}
+		values = append(values, parts[0])
+	}
+
 	// Extract flags and values
 	for i := 1; i < count; i++ {
 		part := parts[i]

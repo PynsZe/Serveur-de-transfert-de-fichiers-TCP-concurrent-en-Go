@@ -57,6 +57,13 @@ func Run(remote string, dir *string) {
 				return
 			}
 			out.Flush()
+		case "Terminate", "Hide", "Reveal":
+			_, err = out.WriteString(line)
+			if err != nil {
+				slog.Error(err.Error())
+				return
+			}
+			out.Flush()
 		default:
 			slog.Warn("Unknown command: " + cmd)
 			continue
@@ -84,7 +91,7 @@ func Run(remote string, dir *string) {
 *
 * @param in : le reader pour lire les données du serveur
 * @param out : le writer pour envoyer des données au serveur
-*/
+ */
 func handleListClient(in *bufio.Reader, out *bufio.Writer) {
 	// Lecture de "FileCnt X"
 	header, err := in.ReadString('\n')
@@ -156,7 +163,7 @@ func handleGetClient(in *bufio.Reader, out *bufio.Writer, pathDir string, file s
 	fmt.Sscanf(fileSize, "%d", &count)
 
 	// Ouvrir le fichier en écriture
-	f, err := os.Create(pathDir +"/"+ file)
+	f, err := os.Create(pathDir + "/" + file)
 	if err != nil {
 		slog.Error("Erreur création fichier : " + err.Error())
 		return

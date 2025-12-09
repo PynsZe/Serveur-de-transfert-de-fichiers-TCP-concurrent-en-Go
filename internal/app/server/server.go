@@ -16,13 +16,18 @@ import (
 /* etat global du serveur */
 
 var (
-	clientCount    int
-	clientCountMux sync.Mutex      // Mutex pour protéger clientCount
-	hiddenFiles    map[string]bool // map[filename] -> true (caché)
-	hiddenFilesMux sync.Mutex      // Mutex pour protéger hiddenFiles
-	terminateChan  chan struct{}   // Canal utilisé pour signaler l'arrêt à RunServer
-	serverWG       sync.WaitGroup  // Pour attendre la fin de RunServer
-	clientWG       sync.WaitGroup  // Pour attendre que tous les handleClient se terminent
+	clientCount      int
+	terminateRequest bool            // requete pour terminate
+	clientCountMux   sync.Mutex      // Mutex pour protéger clientCount
+	hiddenFiles      map[string]bool // map[filename] -> true (caché)
+	hiddenFilesMux   sync.Mutex      // Mutex pour protéger hiddenFiles
+	terminateChan    chan struct{}   // Canal utilisé pour signaler l'arrêt à RunServer
+	serverWG         sync.WaitGroup  // Pour attendre la fin de RunServer
+	clientWG         sync.WaitGroup  // Pour attendre que tous les handleClient se terminent
+
+	isCommandeUsed    bool       //etats des commandes
+	isCommandeUsedMux sync.Mutex // Mutex pour protéger isCommandeUsedount
+
 )
 
 /* compteur pour le nombre de client connecté */
@@ -42,6 +47,19 @@ func displayClientCount() {
 		// Attendre
 		time.Sleep(CountClient)
 	}
+}
+
+func setIsCommandeUsed(val bool) {
+	isCommandeUsedMux.Lock()
+	isCommandeUsed = val
+	isCommandeUsedMux.Unlock()
+}
+
+func getIsCommandeUsed() bool {
+	isCommandeUsedMux.Lock()
+	val := isCommandeUsed
+	isCommandeUsedMux.Unlock()
+	return val
 }
 
 func RunServer(port *string, dir *string) {
@@ -68,6 +86,7 @@ func RunServer(port *string, dir *string) {
 
 	/* compteur mis en route */
 	go displayClientCount()
+	go checkForTerminate(l)
 
 	for {
 		select {
@@ -90,6 +109,23 @@ func RunServer(port *string, dir *string) {
 			clientWG.Add(1) //  Incrémenter le WaitGroup avant de lancer la goroutine
 			go handleClient(c, *dir)
 		}
+	}
+}
+
+func checkForTerminate(l net.Listener) {
+	for {
+		if terminateRequest {
+			isCommandeUsedMux.Lock()
+			commandInProgress := isCommandeUsed
+			isCommandeUsedMux.Unlock()
+
+			if !commandInProgress {
+				slog.Info("Aucune commande utilisée : on ferme le serveur")
+				l.Close()
+				return
+			}
+		}
+		time.Sleep(100 * time.Millisecond) // Vérifier toutes les 100ms
 	}
 }
 
@@ -267,7 +303,7 @@ func handleClient(c net.Conn, rootDir string) {
 }
 
 func handleList(w *bufio.Writer, r *bufio.Reader, pathDir string) {
-
+	setIsCommandeUsed(true)
 	/* lecture  du contenue du dossier */
 
 	entre, err := os.ReadDir(pathDir)
@@ -324,10 +360,12 @@ func handleList(w *bufio.Writer, r *bufio.Reader, pathDir string) {
 		return
 	}
 	slog.Debug("Le client a validé la reception avec ok")
-
+	setIsCommandeUsed(false)
 }
 
-func handleGet(w *bufio.Writer, r *bufio.Reader, pathDir string, filename string){
+func handleGet(w *bufio.Writer, r *bufio.Reader, pathDir string, filename string) {
+	setIsCommandeUsed(true)
+
 	// TODO () : gérer les erreurs et les fichiers cachés
 	// TODO () : gérer les erreurs de path pas existants
 	// TODO () : gérer l'enregistrement des fichiers dans le repo voulu
@@ -335,15 +373,15 @@ func handleGet(w *bufio.Writer, r *bufio.Reader, pathDir string, filename string
 	filePath := filepath.Join(pathDir, filename)
 
 	hiddenFilesMux.Lock()
-    _, isHidden := hiddenFiles[filename]
-    hiddenFilesMux.Unlock()
+	_, isHidden := hiddenFiles[filename]
+	hiddenFilesMux.Unlock()
 
-    if isHidden {
-        slog.Warn("Tentative de GET sur un fichier caché: " + filename)
-        w.WriteString("FileHidden\n")
-        w.Flush()
-        return
-    }
+	if isHidden {
+		slog.Warn("Tentative de GET sur un fichier caché: " + filename)
+		w.WriteString("FileHidden\n")
+		w.Flush()
+		return
+	}
 
 	/* ouverture du fichier */
 	file, err := os.Open(filePath)
@@ -404,7 +442,7 @@ func handleGet(w *bufio.Writer, r *bufio.Reader, pathDir string, filename string
 		"client", file.Name())
 
 	slog.Debug("Le client a validé la reception avec ok")
-
+	setIsCommandeUsed(false)
 }
 
 func handleHide(w *bufio.Writer, r *bufio.Reader, pathDir string, filename string) {
@@ -468,6 +506,22 @@ func handleTerminate(w *bufio.Writer, r *bufio.Reader) {
 
 	slog.Warn("COMMANDE TERMINATE REÇUE. Début de l'arrêt ordonné.")
 
+	// Vérifier le nombre de clients connectés
+	/* 	clientCountMux.Lock()
+	   	currentCount := clientCount
+	   	clientCountMux.Unlock() */
+
+	terminateRequest = true
+	/*
+	 if currentCount > 0 {
+	 	slog.Warn(fmt.Sprintf("Impossible de terminer : %d clients sont encore connectés.", currentCount))
+	 	w.WriteString("TerminateRefused\n")
+	 	w.Flush()
+	 	return
+	 } */
+
+	slog.Warn("COMMANDE TERMINATE REÇUE. Début de l'arrêt ordonné.")
+
 	// Stopper l'écoute de RunServer
 	close(terminateChan)
 	slog.Info("Arrêt de l'écoute des nouvelles connexions.")
@@ -481,8 +535,7 @@ func handleTerminate(w *bufio.Writer, r *bufio.Reader) {
 	w.Flush()
 
 	// Arrêt du processus
-	serverWG.Wait()
-
+	/* serverWG.Wait() */
 	slog.Info("Processus serveur terminé.")
 	os.Exit(0) // Arrêter le processus Go
 }

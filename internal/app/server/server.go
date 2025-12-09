@@ -334,6 +334,17 @@ func handleGet(w *bufio.Writer, r *bufio.Reader, pathDir string, filename string
 
 	filePath := filepath.Join(pathDir, filename)
 
+	hiddenFilesMux.Lock()
+    _, isHidden := hiddenFiles[filename]
+    hiddenFilesMux.Unlock()
+
+    if isHidden {
+        slog.Warn("Tentative de GET sur un fichier caché: " + filename)
+        w.WriteString("FileHidden\n")
+        w.Flush()
+        return
+    }
+
 	/* ouverture du fichier */
 	file, err := os.Open(filePath)
 	if err != nil {

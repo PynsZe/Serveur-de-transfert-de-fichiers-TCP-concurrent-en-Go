@@ -1,4 +1,4 @@
-[~]$ ssh-keygen -t ed25519
+# [~]$ ssh-keygen -t ed25519
 Generating public/private ed25519 key pair.
 Enter file in which to save the key (/var/home/E248268G/.ssh/id_ed25519): mathis
 Enter passphrase for "mathis" (empty for no passphrase): 
@@ -6,19 +6,6 @@ Enter same passphrase again:
 Your identification has been saved in mathis
 Your public key has been saved in mathis.pub
 The key fingerprint is:
-SHA256:1DAxx0yQCPe0n5Eme/y7Tt1/TguTJVDJzEcfGQW4z4g E248268G@u-inf-j-f104-26
-The key's randomart image is:
-+--[ED25519 256]--+
-|    ....BBo +o+==|
-|     ..o.Bo.o= oo|
-|        = =. .. .|
-|       . * oo    |
-|        S =. = . |
-|         .E...*. |
-|            o+. o|
-|           . .o.+|
-|           .+. o+|
-+----[SHA256]-----+
 [~]$ l
 bash: l : commande introuvable
 [~]$ ls

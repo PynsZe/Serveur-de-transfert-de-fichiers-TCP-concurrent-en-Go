@@ -51,7 +51,7 @@ func Run(remote string, dir *string) {
 
 		switch cmd {
 		case "End", "List", "Get":
-			_, err = out.WriteString(line + "\n")
+			_, err = out.WriteString(line)
 			if err != nil {
 				slog.Error(err.Error())
 				return
@@ -129,12 +129,12 @@ func handleListClient(in *bufio.Reader, out *bufio.Writer) {
 
 func handleGetClient(in *bufio.Reader, out *bufio.Writer, pathDir string, file string) {
 	//commence la recuperation du fichier.
-	fmt.Println("→ Demande de téléchargement du fichier : " + file + " dans le répertoire " + pathDir)
 	slog.Debug("Demande de téléchargement du fichier : " + file)
 
 	// Lecture de la réponse du serveur
 	// Header : Start
 	header, err := in.ReadString('\n')
+	slog.Debug("header : " + header)
 	if err != nil {
 		slog.Error("Erreur réception FileSize : " + err.Error())
 		return
@@ -144,6 +144,7 @@ func handleGetClient(in *bufio.Reader, out *bufio.Writer, pathDir string, file s
 
 	// Lecture de la taille du fichier
 	fileSize, err := in.ReadString('\n')
+	slog.Debug("fileSize : " + fileSize)
 	if err != nil {
 		slog.Error("Erreur réception FileSize : " + err.Error())
 		return
@@ -155,7 +156,7 @@ func handleGetClient(in *bufio.Reader, out *bufio.Writer, pathDir string, file s
 	fmt.Sscanf(fileSize, "%d", &count)
 
 	// Ouvrir le fichier en écriture
-	f, err := os.Create(file)
+	f, err := os.Create(pathDir +"/"+ file)
 	if err != nil {
 		slog.Error("Erreur création fichier : " + err.Error())
 		return

@@ -1,0 +1,7 @@
+voici un fichier test !
+ligne 2.
+
+^ ligne vide avavnt ^
+ligne vide apres :
+
+123456789$&é"'(-è_çà)=*ù$ŵ

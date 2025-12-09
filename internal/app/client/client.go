@@ -141,6 +141,13 @@ func handleGetClient(in *bufio.Reader, out *bufio.Writer, pathDir string, file s
 	}
 	header = strings.TrimSpace(header)
 	fmt.Println(header)
+	slog.Debug("Réponse serveur : " + header)
+
+	if header != "Start" {
+        slog.Warn("Transfert annulé par le serveur: " + header)
+        // La transaction est terminée. On retourne au prompt principal.
+        return 
+    }
 
 	// Lecture de la taille du fichier
 	fileSize, err := in.ReadString('\n')

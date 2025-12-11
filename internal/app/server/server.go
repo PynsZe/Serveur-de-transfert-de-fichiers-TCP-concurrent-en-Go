@@ -30,10 +30,19 @@ var (
 
 	forceClientShutdown chan struct{}
     
-    // NOUVEAU: Liste des connexions actives
+    //Liste des connexions actives
     activeConnections    map[net.Conn]bool 
     activeConnectionsMux sync.Mutex
 
+	adminActive    bool       // true si un admin est connecté
+    adminActiveMux sync.Mutex // Mutex pour protéger adminActive
+)
+
+const(
+	DirPrefix   = "├── " // Préfixe pour tous les éléments sauf le dernier
+	LastDirPrefix = "└── " // Préfixe pour le dernier élément d'une liste
+	ChildPrefix   = "│   " // Préfixe pour l'indentation des enfants (continue)
+	EmptyPrefix   = "    " // Préfixe pour l'indentation des enfants (vide)
 )
 
 /* compteur pour le nombre de client connecté */
@@ -70,6 +79,8 @@ func getIsCommandeUsed() bool {
 
 func RunServer(port *string, dir *string) {
 
+	cleanedRootDir := filepath.Clean(*dir)
+
 	if hiddenFiles == nil {
 		hiddenFiles = make(map[string]bool)
 	}
@@ -90,7 +101,7 @@ func RunServer(port *string, dir *string) {
 		slog.Debug("Stopped listening on port " + *port)
 	}()
 	slog.Debug("Now listening on port " + *port)
-	slog.Info("Files coming from directory " + *dir)
+	slog.Info("Files coming from directory " + cleanedRootDir) // Utiliser cleanedRootDir
 
 	/* compteur mis en route */
 	go displayClientCount()
@@ -115,7 +126,7 @@ func RunServer(port *string, dir *string) {
 			}
 			/* lancement d'une nouvelle go routine pour le client */
 			clientWG.Add(1) //  Incrémenter le WaitGroup avant de lancer la goroutine
-			go handleClient(c, *dir)
+			go handleClient(c, cleanedRootDir)
 		}
 	}
 }
@@ -138,6 +149,8 @@ func checkForTerminate(l net.Listener) {
 }
 
 func RunAdminServer(port string, rootDir string) {
+
+	cleanedRootDir := filepath.Clean(rootDir)
 
 	l, e := net.Listen("tcp", ":"+port)
 	if e != nil {
@@ -165,9 +178,24 @@ func RunAdminServer(port string, rootDir string) {
 				slog.Error("Erreur, ne peut pas accepté connexion admin: " + e.Error())
 				continue
 			}
+
+			adminActiveMux.Lock()
+			if adminActive {
+				adminActiveMux.Unlock()
+				slog.Warn("Tentative de connexion ADMIN multiple. Refus de " + c.RemoteAddr().String())
+				
+				c.Write([]byte("AdminConnectionRefused\n"))
+				c.Close()
+				continue
+
+			}
+
+			adminActive = true
+			adminActiveMux.Unlock()
+
 			// Les commandes Admin sont des clients comme les autres
 			clientWG.Add(1)
-			go handleAdminClient(c, rootDir)
+			go handleAdminClient(c, cleanedRootDir)
 		}
 	}
 }
@@ -180,6 +208,7 @@ func handleAdminClient(c net.Conn, rootDir string) {
 	// Le comptage des clients (clientCount) reste dans handleClient pour les connexions classiques.
 	// Pour l'admin, on utilise seulement le WaitGroup.
 
+	currentDir := rootDir
 
 	activeConnectionsMux.Lock()
     activeConnections[c] = true
@@ -187,6 +216,11 @@ func handleAdminClient(c net.Conn, rootDir string) {
 
 	slog.Info("Incoming ADMIN connection from " + c.RemoteAddr().String())
 	defer func() {
+
+		adminActiveMux.Lock()
+		adminActive = false
+		adminActiveMux.Unlock()
+
 		activeConnectionsMux.Lock()
         delete(activeConnections, c)
         activeConnectionsMux.Unlock()
@@ -227,7 +261,7 @@ func handleAdminClient(c net.Conn, rootDir string) {
 				continue
 			}
 			filename := partie[1]
-			handleHide(writer, reader, rootDir, filename)
+			handleHide(writer, reader, currentDir, filename)
 		} else if commande == "Reveal" {
 			if len(partie) < 2 {
 				slog.Warn("commande incomplete: Reveal")
@@ -236,12 +270,25 @@ func handleAdminClient(c net.Conn, rootDir string) {
 				continue
 			}
 			filename := partie[1]
-			handleReveal(writer, reader, rootDir, filename)
+			handleReveal(writer, reader, currentDir, filename)
 		} else if commande == "Terminate" {
 			// C'est le seul endroit où Terminate devrait être appelée
 			handleTerminate(writer, reader)
 			return
-		} else {
+		}else if commande == "List"{ 
+			handleList(writer, reader, currentDir)
+		}else if commande == "Cd" { // <-- NOUVELLE COMMANDE CD
+            if len(partie) < 2 {
+                slog.Warn("commande incomplete: Cd")
+                writer.WriteString("CommandIncomplete\n")
+                writer.Flush()
+                continue
+            }
+            targetDir := partie[1]
+            // Met à jour le répertoire courant
+            newDir := handleChangeDir(writer, currentDir, rootDir, targetDir)
+            currentDir = newDir 
+        }else {
 			slog.Warn("command ADMIN inconnue " + commandLine)
 			writer.WriteString("UnknownCommand\n")
 			writer.Flush()
@@ -250,6 +297,8 @@ func handleAdminClient(c net.Conn, rootDir string) {
 }
 
 func handleClient(c net.Conn, rootDir string) {
+
+	currentDir := rootDir
 
 	clientCountMux.Lock()
 	clientCount++
@@ -306,15 +355,26 @@ func handleClient(c net.Conn, rootDir string) {
 		/* commandes */
 
 		if commande == "List" {
-			handleList(writer, reader, rootDir)
+			handleList(writer, reader, currentDir)
 		} else if commande == "Get" {
 			if len(partie) < 2 {
 				slog.Warn("commande incomplete")
 				continue
 			}
 			filename := partie[1]
-			handleGet(writer, reader, rootDir, filename)
-		} else if commande == "End" { // Seule commande de déconnexion client
+			handleGet(writer, reader, currentDir, filename)
+		} else if commande == "Cd" { // <-- NOUVELLE COMMANDE CD
+            if len(partie) < 2 {
+                slog.Warn("commande incomplete: Cd")
+                writer.WriteString("CommandIncomplete\n")
+                writer.Flush()
+                continue
+            }
+            targetDir := partie[1]
+            // Met à jour le répertoire courant
+            newDir := handleChangeDir(writer, currentDir, rootDir, targetDir)
+            currentDir = newDir 
+        } else if commande == "End" { // Seule commande de déconnexion client
 			slog.Info("Client" + c.RemoteAddr().String() + "veut se deconnecter")
 			break
 			// Supprimer les `else if` pour Hide, Reveal, et Terminate ici
@@ -326,65 +386,189 @@ func handleClient(c net.Conn, rootDir string) {
 	}
 }
 
+func handleChangeDir(w *bufio.Writer, currentDir string, rootDir string, targetDir string) string {
+    setIsCommandeUsed(true)
+    defer setIsCommandeUsed(false)
+    
+    
+    // assure que le client ne peut pas utiliser de chemins absolus 
+    if filepath.IsAbs(targetDir) {
+        slog.Warn("Tentative d'utiliser un chemin absolu: " + targetDir)
+        w.WriteString("AbsolutePathsForbidden\n")
+        w.Flush()
+        return currentDir
+    }
+
+    // joint le répertoire courant et la cible, puis nettoyer
+    absTarget := filepath.Join(currentDir, targetDir)
+    cleanTarget := filepath.Clean(absTarget)
+    
+    slog.Debug("Tentative de changement de dir vers : " + cleanTarget)
+
+    
+    // assure que le client ne sort jamais du répertoire racine 
+    /* if !strings.HasPrefix(cleanTarget, rootDir) {
+        slog.Warn("Tentative de sortir du répertoire racine: " + cleanTarget)
+        w.WriteString("AccessDenied\n")
+        w.Flush()
+        return currentDir
+    } */
+
+    
+    fileInfo, err := os.Stat(cleanTarget)
+    if err != nil {
+        if os.IsNotExist(err) {
+            slog.Warn("Répertoire cible inconnu: " + cleanTarget)
+            w.WriteString("DirectoryUnknown\n")
+        } else {
+            slog.Error("Erreur Stat sur répertoire: " + err.Error())
+            w.WriteString("ServerError\n")
+        }
+        w.Flush()
+        return currentDir
+    }
+
+    if !fileInfo.IsDir() {
+        slog.Warn("La cible n'est pas un répertoire: " + cleanTarget)
+        w.WriteString("NotADirectory\n")
+        w.Flush()
+        return currentDir
+    }
+
+    slog.Info(fmt.Sprintf("CWD mis à jour de %s à %s", currentDir, cleanTarget))
+    w.WriteString("OK\n")
+    w.Flush()
+    
+    return cleanTarget // Retourne le nouveau chemin nettoyé
+}
+
+
+func buildTree(pathDir string, prefix string, messages *[]string, isRoot bool) error {
+
+    entries, err := os.ReadDir(pathDir)
+    if err != nil {
+        return err
+    }
+
+    dirs := []os.DirEntry{}
+    files := []os.DirEntry{}
+
+    // Filtrage et préparation des listes
+    hiddenFilesMux.Lock()
+    for _, entry := range entries {
+        name := entry.Name()
+        
+        if strings.HasPrefix(name, ".") {
+            continue
+        }
+        
+        if _, isHidden := hiddenFiles[name]; isHidden {
+            continue
+        }
+        
+        
+        if entry.IsDir() {
+            dirs = append(dirs, entry)
+        } else if entry.Type().IsRegular() {
+            files = append(files, entry)
+        }
+        // On ignore les autres types (liens symboliques, sockets, etc.)
+    }
+    hiddenFilesMux.Unlock()
+
+    // L'ordre d'affichage est Répertoires puis Fichiers
+    sortedEntries := append(dirs, files...)
+    totalEntries := len(sortedEntries)
+
+    if isRoot {
+        *messages = append(*messages, ".\n")
+    }
+
+    for i, entry := range sortedEntries {
+        isLast := i == totalEntries-1
+
+        // Déterminer les préfixes pour l'affichage de la ligne
+        linePref := DirPrefix
+        nextPref := ChildPrefix
+        if isLast {
+            linePref = LastDirPrefix
+            nextPref = EmptyPrefix
+        }
+
+        name := entry.Name()
+        var line string
+
+        if entry.IsDir() {
+            // Affichage pour le répertoire
+            line = fmt.Sprintf("%s%s%s\n", prefix, linePref, name)
+        } else {
+            // Affichage pour le fichier + Taille
+            info, err := entry.Info()
+            fileSize := int64(0)
+            if err == nil {
+                fileSize = info.Size()
+            } else {
+                slog.Error("Impossible d'obtenir la taille du fichier", "file", name, "error", err.Error())
+            }
+            line = fmt.Sprintf("%s%s%s %d octets\n", prefix, linePref, name, fileSize)
+        }
+        *messages = append(*messages, line)
+
+        // Appel récursif pour les sous-répertoires
+        if entry.IsDir() {
+            newPath := filepath.Join(pathDir, name)
+            newPrefix := prefix + nextPref // Ajout de l'indentation pour le niveau suivant
+
+            if err := buildTree(newPath, newPrefix, messages, false); err != nil {
+                slog.Error(fmt.Sprintf("Erreur lecture répertoire %s: %s", newPath, err.Error()))
+            }
+        }
+    }
+    return nil
+}
+
+
+
 func handleList(w *bufio.Writer, r *bufio.Reader, pathDir string) {
-	setIsCommandeUsed(true)
-	/* lecture  du contenue du dossier */
+    setIsCommandeUsed(true)
+    defer setIsCommandeUsed(false) 
 
-	entre, err := os.ReadDir(pathDir)
-	if err != nil {
-		slog.Error("N'A PAS PU LIRE LE DOSSIER" + err.Error())
-		w.WriteString("FileCnt 0\n") /*  Envoi d'une liste vide pour ne pas bloquer le client. */
-		w.Flush()
-		return
-	}
+    messages := []string{}
+    
+    // Appel à la fonction récursive pour construire l'arborescence
+    err := buildTree(pathDir, "", &messages, true) // true pour indiquer la racine (.)
+    if err != nil {
+        slog.Error("Erreur lors de la construction de l'arborescence: " + err.Error())
+        w.WriteString("FileCnt 0\n")
+        w.Flush()
+        // Tenter de lire OK même si échec (pour vider le buffer si le client envoie OK immédiatement)
+        r.ReadString('\n')
+        return
+    }
 
-	hiddenFilesMux.Lock()
-	defer hiddenFilesMux.Unlock()
+    count := len(messages)
 
-	/* preparation du message pour filecnt + comptage des fichiers  */
-	/* preparation d'une liste de messages de fichiers a envoyer */
+    /* envoyer compteur FileCnt X */
+    countMsg := fmt.Sprintf("FileCnt %d\n", count)
+    w.WriteString(countMsg)
+    slog.Debug("Serveur envoi: " + strings.TrimSpace(countMsg))
 
-	messages := []string{}
+    /* envoyer la liste détaillée (l'arborescence) */
+    for _, msg := range messages {
+        w.WriteString(msg)
+        // slog.Debug("Serveur envoi :" + strings.TrimSpace(msg)) // Commenté pour ne pas surcharger les logs
+    }
 
-	for _, entree := range entre {
-		if _, isHidden := hiddenFiles[entree.Name()]; isHidden {
-			continue
-		}
-		if entree.Type().IsRegular() {
-			info, _ := entree.Info()
-			ligneMess := fmt.Sprintf("%s %d\n", entree.Name(), info.Size())
-			messages = append(messages, ligneMess)
-		}
-	}
+    w.Flush()
+    slog.Debug(fmt.Sprintf("%d lignes d'arborescence envoyées", count))
 
-	count := len(messages)
-
-	/* envoyer compteur filecnt x */
-
-	countMsg := fmt.Sprintf("FileCnt %d\n", count)
-	w.WriteString(countMsg)
-	slog.Debug("Serveur envoi: " + strings.TrimSpace(countMsg))
-
-	/* envoyer la liste detaillé */
-
-	for _, msg := range messages {
-		w.WriteString(msg)
-		slog.Debug("Serveur envoi :" + strings.TrimSpace(msg))
-	}
-
-	w.Flush()
-	slog.Debug(fmt.Sprintf("%d fichiers listés et envoyés", count))
-
-	ok, err := r.ReadString('\n')
-	if err != nil || strings.TrimSpace(ok) != "OK" {
-		slog.Error("LE CLIENT N'A PAS REPONDUS OK")
-		if err == io.EOF {
-			return
-		}
-		return
-	}
-	slog.Debug("Le client a validé la reception avec ok")
-	setIsCommandeUsed(false)
+    // Attente du OK par le client
+    ok, err := r.ReadString('\n')
+    if err != nil || strings.TrimSpace(ok) != "OK" {
+        slog.Error("LE CLIENT N'A PAS RÉPONDU OK (erreur ou EOF): " + err.Error())
+        return
+    }
+    slog.Debug("Le client a validé la réception avec OK")
 }
 
 func handleGet(w *bufio.Writer, r *bufio.Reader, pathDir string, filename string) {
@@ -475,8 +659,8 @@ func handleHide(w *bufio.Writer, r *bufio.Reader, pathDir string, filename strin
 	// Vérifie l'existence et le type du fichier
 	fileInfo, err := os.Stat(filePath)
 
-	if os.IsNotExist(err) || err != nil || !fileInfo.Mode().IsRegular() {
-		slog.Warn("Tentative de cacher un fichier inconnu ou non régulier: " + filename)
+	if os.IsNotExist(err) || err != nil || (!fileInfo.Mode().IsRegular() && !fileInfo.IsDir()){
+		slog.Warn("Tentative de cacher un élément inconnu ou non régulier/répertoire : " + filename)
 		w.WriteString("FileUnknown\n")
 		w.Flush()
 		return
@@ -488,7 +672,7 @@ func handleHide(w *bufio.Writer, r *bufio.Reader, pathDir string, filename strin
 
 	if _, alreadyHidden := hiddenFiles[filename]; !alreadyHidden {
 		hiddenFiles[filename] = true
-		slog.Info("Fichier caché: " + filename)
+		slog.Info("Element caché: " + filename)
 	}
 
 	// Répondre OK
@@ -503,8 +687,8 @@ func handleReveal(w *bufio.Writer, r *bufio.Reader, pathDir string, filename str
 	//Vérifie l'existence sur le disque
 	fileInfo, err := os.Stat(filePath)
 
-	if os.IsNotExist(err) || err != nil || !fileInfo.Mode().IsRegular() {
-		slog.Warn("Tentative de révéler un fichier inconnu ou non régulier: " + filename)
+	if os.IsNotExist(err) || err != nil || (!fileInfo.Mode().IsRegular() && !fileInfo.IsDir()) {
+		slog.Warn("Tentative de révéler un élément inconnu ou non régulier/répertoire : " + filename)
 		w.WriteString("FileUnknown\n")
 		w.Flush()
 		return
@@ -516,9 +700,9 @@ func handleReveal(w *bufio.Writer, r *bufio.Reader, pathDir string, filename str
 
 	if _, wasHidden := hiddenFiles[filename]; wasHidden {
 		delete(hiddenFiles, filename) // Supprime l'entrée de la map
-		slog.Info("Fichier révélé: " + filename)
+		slog.Info("Element révélé: " + filename)
 	} else {
-		slog.Debug("Le fichier " + filename + " n'était pas marqué comme caché.")
+		slog.Debug("L'éelement " + filename + " n'était pas marqué comme caché.")
 	}
 
 	//Répond OK

@@ -51,7 +51,7 @@ func Run(remote string, dir *string) {
 		}
 
 		switch cmd {
-		case "End", "List", "Get":
+		case "End", "List", "Get", "Cd":
 			_, err = out.WriteString(line)
 			if err != nil {
 				slog.Error(err.Error())
@@ -84,12 +84,27 @@ func Run(remote string, dir *string) {
             slog.Debug("Sending command: " + cmd + " " + value)
             handleGetClient(in, out, *dir, value)
 
+		case "Cd": // <--- NOUVEAU CAS POUR GÉRER LA RÉPONSE DE Cd
+			// Lit la réponse simple envoyée par le serveur (OK ou erreur)
+			response, err := in.ReadString('\n')
+			if err != nil {
+				slog.Error("Erreur lors de la réception de la réponse Cd : " + err.Error())
+				return
+			}
+			response = strings.TrimSpace(response)
+			
+			if response == "OK" {
+				fmt.Println("Répertoire courant mis à jour.")
+			} else {
+				fmt.Printf("Échec du changement de répertoire: %s\n", response)
+			}
+
         // NOUVEAU BLOC : Gère la réponse des commandes admin
         case "Terminate", "Hide", "Reveal":
             // CORRECTION : On lit la réponse ici, APRÈS l'envoi.
             response, err := in.ReadString('\n')
             if err != nil {
-                // Si la lecture échoue (ex: EOF), la connexion est probablement coupée par le serveur.
+                // Si la lecture échoue, la connexion est probablement coupée par le serveur.
                 if cmd == "Terminate" {
                     fmt.Println("Commande Terminate exécutée. Déconnexion forcée du client.")
                 } else {

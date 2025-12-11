@@ -32,6 +32,9 @@ func Parse(in string) (cmd string, values string, err error) {
 		if parts[0] == "Reveal" {
 			return "", "", fmt.Errorf("'Reveal' requires a value")
 		}
+		if parts[0] == "Cd" {
+			return "", "", fmt.Errorf("'Cd' requires a value")
+		}
 		return parts[0], "", nil
 
 	case 2:
@@ -43,6 +46,9 @@ func Parse(in string) (cmd string, values string, err error) {
 		}
 		if parts[0] == "Reveal" {
 			return "Reveal", parts[1], nil
+		}
+		if parts[0] == "Cd" {
+			return "Cd", parts[1], nil
 		}
 		return "", "", fmt.Errorf("unknown 2-part command")
 	default:

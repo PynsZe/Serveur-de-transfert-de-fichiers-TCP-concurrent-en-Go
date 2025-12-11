@@ -41,6 +41,7 @@ func Run(remote string, dir *string) {
 		line, err := stdin.ReadString('\n')
 		if err != nil {
 			slog.Error(err.Error())
+			return
 		}
 
 		cmd, value, parsErr := proto.Parse(strings.TrimSpace(line))
@@ -58,6 +59,7 @@ func Run(remote string, dir *string) {
 			}
 			out.Flush()
 		case "Terminate", "Hide", "Reveal":
+			
 			_, err = out.WriteString(line)
 			if err != nil {
 				slog.Error(err.Error())
@@ -70,19 +72,41 @@ func Run(remote string, dir *string) {
 		}
 
 		switch cmd {
-		case "End":
-			slog.Info("Session closed by user")
-			return
+        case "End":
+            slog.Info("Session closed by user")
+            return
 
-		case "List":
-			slog.Debug("Sending command: " + cmd + " " + value)
-			handleListClient(in, out)
+        case "List":
+            slog.Debug("Sending command: " + cmd + " " + value)
+            handleListClient(in, out)
 
-		case "Get":
-			slog.Debug("Sending command: " + cmd + " " + value)
-			handleGetClient(in, out, *dir, value)
+        case "Get":
+            slog.Debug("Sending command: " + cmd + " " + value)
+            handleGetClient(in, out, *dir, value)
 
-		}
+        // NOUVEAU BLOC : Gère la réponse des commandes admin
+        case "Terminate", "Hide", "Reveal":
+            // CORRECTION : On lit la réponse ici, APRÈS l'envoi.
+            response, err := in.ReadString('\n')
+            if err != nil {
+                // Si la lecture échoue (ex: EOF), la connexion est probablement coupée par le serveur.
+                if cmd == "Terminate" {
+                    fmt.Println("Commande Terminate exécutée. Déconnexion forcée du client.")
+                } else {
+                    slog.Error(fmt.Sprintf("Connexion interrompue après %s: %s", cmd, err.Error()))
+                }
+                return // Quitter la session
+            }
+
+            response = strings.TrimSpace(response)
+            fmt.Printf("Serveur réponse (%s): %s\n", cmd, response)
+
+            // Si Terminate est un succès, on quitte le client
+            if cmd == "Terminate" && response == "OK" {
+                slog.Info("Serveur arrêté par Terminate. Déconnexion.")
+                return 
+            }
+        }
 	}
 }
 

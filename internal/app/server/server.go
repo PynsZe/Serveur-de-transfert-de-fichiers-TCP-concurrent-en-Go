@@ -28,6 +28,12 @@ var (
 	isCommandeUsed    bool       //etats des commandes
 	isCommandeUsedMux sync.Mutex // Mutex pour protéger isCommandeUsedount
 
+	forceClientShutdown chan struct{}
+    
+    // NOUVEAU: Liste des connexions actives
+    activeConnections    map[net.Conn]bool 
+    activeConnectionsMux sync.Mutex
+
 )
 
 /* compteur pour le nombre de client connecté */
@@ -69,6 +75,8 @@ func RunServer(port *string, dir *string) {
 	}
 
 	terminateChan = make(chan struct{})
+	forceClientShutdown = make(chan struct{}) // Initialisation
+    activeConnections = make(map[net.Conn]bool) // Initialisation
 	serverWG.Add(1) // Le serveur principal doit être attendu
 
 	l, e := net.Listen("tcp", ":"+*port)
@@ -172,8 +180,16 @@ func handleAdminClient(c net.Conn, rootDir string) {
 	// Le comptage des clients (clientCount) reste dans handleClient pour les connexions classiques.
 	// Pour l'admin, on utilise seulement le WaitGroup.
 
+
+	activeConnectionsMux.Lock()
+    activeConnections[c] = true
+    activeConnectionsMux.Unlock()
+
 	slog.Info("Incoming ADMIN connection from " + c.RemoteAddr().String())
 	defer func() {
+		activeConnectionsMux.Lock()
+        delete(activeConnections, c)
+        activeConnectionsMux.Unlock()
 		c.Close()
 		slog.Info("ADMIN Connexion closed for" + c.RemoteAddr().String())
 		clientWG.Done() // Indiquer que cette goroutine est terminée
@@ -239,8 +255,16 @@ func handleClient(c net.Conn, rootDir string) {
 	clientCount++
 	clientCountMux.Unlock()
 
+	activeConnectionsMux.Lock()
+    activeConnections[c] = true
+    activeConnectionsMux.Unlock()
+
 	slog.Info("Incoming connection from " + c.RemoteAddr().String())
 	defer func() {
+		activeConnectionsMux.Lock()
+        delete(activeConnections, c)
+        activeConnectionsMux.Unlock()
+
 		c.Close()
 		slog.Info("Connexion closed for" + c.RemoteAddr().String())
 
@@ -527,9 +551,27 @@ func handleTerminate(w *bufio.Writer, r *bufio.Reader) {
 	slog.Info("Arrêt de l'écoute des nouvelles connexions.")
 
 	// Attend que tous les clients actifs terminent leurs commandes et se déconnectent.
-	clientWG.Wait()
+	/* clientWG.Wait() */
 	slog.Info("Tous les clients sont déconnectés. Serveur arrêté.")
 
+	activeConnectionsMux.Lock()
+    // Créer une liste de connexions à fermer pour éviter les deadlocks si la map est modifiée ailleurs
+    connectionsToClose := make([]net.Conn, 0, len(activeConnections))
+    for conn := range activeConnections {
+        connectionsToClose = append(connectionsToClose, conn)
+    }
+    activeConnectionsMux.Unlock()
+
+    for conn, _ := range activeConnections {
+        conn.Close() 
+        // L'appel à conn.Close() ici déclenche la fonction defer dans handleClient/handleAdminClient
+        // qui va décrémenter clientWG, mais nous avons déjà attendu clientWG.
+    }
+	slog.Info(fmt.Sprintf("%d connexions fermées par le serveur.", len(connectionsToClose)))
+    // Vider la map pour ne pas garder de références (même si os.Exit(0) arrive)
+    /* activeConnections = make(map[net.Conn]bool) 
+    activeConnectionsMux.Unlock() */
+	clientWG.Wait()
 	//Envoie la confirmation au client de contrôle
 	w.WriteString("OK\n")
 	w.Flush()

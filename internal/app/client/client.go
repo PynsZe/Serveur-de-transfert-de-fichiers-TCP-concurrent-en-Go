@@ -5,15 +5,11 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"io"
+	"context"
 	"os"
 	"strings"
 	"time"
-<<<<<<< HEAD
-	"io"
-	"context"
-=======
-
->>>>>>> 6ebf8d64d229ce81b7ea05842d2e2a0fafce3566
 	"gitlab.univ-nantes.fr/iutna.info2.r305/proj/internal/pkg/proto"
 )
 
@@ -22,7 +18,7 @@ import (
 *
 * @param remote : l'adresse du serveur distant
  */
-func Run(remote string, dir *string, time time.Duration) {
+func Run(remote string, dir *string, timeout time.Duration) {
 
 	c, e := net.Dial("tcp", remote)
 	if e != nil {
@@ -42,11 +38,11 @@ func Run(remote string, dir *string, time time.Duration) {
 	stdin := bufio.NewReader(os.Stdin)
 
 	//timeout de 1s
-	e = c.SetReadDeadline(time.Now().Add(10 * time.Second))
+	/* e = c.SetReadDeadline(time.Now().Add(10 * time.Second))
 	if e != nil {
 		return
 	}
-
+ */
 	// contexte pour pouvoir arrêter proprement
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -58,6 +54,12 @@ func Run(remote string, dir *string, time time.Duration) {
 
 	for {
 
+		readDeadline := time.Now().Add(timeout)
+        e = c.SetReadDeadline(readDeadline)
+        if e != nil {
+             slog.Error("Erreur lors de la configuration du délai de lecture : " + e.Error())
+             return
+        }
 
 		// on sort si la connexion est détectée comme morte
 		select {
@@ -110,11 +112,11 @@ func Run(remote string, dir *string, time time.Duration) {
 
 		case "List":
 			slog.Debug("Sending command: " + cmd + " " + value)
-			handleListClient(in, out, time)
+			handleListClient(in, out, timeout)
 
 		case "Get":
 			slog.Debug("Sending command: " + cmd + " " + value)
-			handleGetClient(in, out, *dir, value, time)
+			handleGetClient(in, out, *dir, value, timeout)
 
 		case "Cd": // <--- NOUVEAU CAS POUR GÉRER LA RÉPONSE DE Cd
 			// Lit la réponse simple envoyée par le serveur (OK ou erreur)

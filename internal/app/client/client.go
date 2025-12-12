@@ -7,7 +7,9 @@ import (
 	"net"
 	"os"
 	"strings"
-
+	"time"
+	"io"
+	"context"
 	"gitlab.univ-nantes.fr/iutna.info2.r305/proj/internal/pkg/proto"
 )
 
@@ -35,7 +37,33 @@ func Run(remote string, dir *string) {
 	out := bufio.NewWriter(c)
 	stdin := bufio.NewReader(os.Stdin)
 
+	//timeout de 1s
+	e = c.SetReadDeadline(time.Now().Add(10 * time.Second))
+	if e != nil {
+		return
+	}
+
+	// contexte pour pouvoir arrêter proprement
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// goroutine de surveillance de la connexion
+	go watchConnection(cancel, c)
+
+
+
 	for {
+
+
+		// on sort si la connexion est détectée comme morte
+		select {
+		case <-ctx.Done():
+			slog.Warn("Connexion perdue, fermeture du client")
+			return
+		default:
+		}
+
+
 		fmt.Print("> ")
 
 		line, err := stdin.ReadString('\n')
@@ -122,6 +150,31 @@ func Run(remote string, dir *string) {
                 return 
             }
         }
+	}
+}
+
+
+// lit périodiquement un octet pour détecter la fermeture de la connexion
+func watchConnection(cancel context.CancelFunc, conn net.Conn) {
+	defer cancel()
+	for {
+		_, err := conn.Read(make([]byte, 1))
+		if err != nil {
+			if ne, ok := err.(net.Error); ok && ne.Timeout() {
+				continue
+			}
+			if err == io.EOF {
+				slog.Info("Connexion fermée par le serveur (EOF)")
+				err := conn.Close()
+				if err != nil {
+					return
+				}
+				os.Exit(0)
+			}
+
+			slog.Error("Erreur de lecture sur la connexion: " + err.Error())
+			return
+		}
 	}
 }
 

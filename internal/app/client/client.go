@@ -181,6 +181,7 @@ func handleListClient(in *bufio.Reader, out *bufio.Writer, timeout time.Duration
 }
 
 func handleGetClient(in *bufio.Reader, out *bufio.Writer, pathDir string, file string, timeout time.Duration) {
+	err := os.MkdirAll(pathDir, os.ModePerm)
 	//commence la recuperation du fichier.
 	start := time.Now()
 	slog.Debug("Demande de téléchargement du fichier : " + file)
@@ -226,7 +227,7 @@ func handleGetClient(in *bufio.Reader, out *bufio.Writer, pathDir string, file s
 
 	// Lire les données du fichier
 	receivedBytes := 0
-	buffer := make([]byte, 1024)
+	buffer := make([]byte, 1)
 	for receivedBytes < count {
 		n, err := in.Read(buffer)
 		if err != nil {

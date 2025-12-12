@@ -8,8 +8,12 @@ import (
 	"os"
 	"strings"
 	"time"
+<<<<<<< HEAD
 	"io"
 	"context"
+=======
+
+>>>>>>> 6ebf8d64d229ce81b7ea05842d2e2a0fafce3566
 	"gitlab.univ-nantes.fr/iutna.info2.r305/proj/internal/pkg/proto"
 )
 
@@ -18,7 +22,7 @@ import (
 *
 * @param remote : l'adresse du serveur distant
  */
-func Run(remote string, dir *string) {
+func Run(remote string, dir *string, time time.Duration) {
 
 	c, e := net.Dial("tcp", remote)
 	if e != nil {
@@ -87,7 +91,7 @@ func Run(remote string, dir *string) {
 			}
 			out.Flush()
 		case "Terminate", "Hide", "Reveal":
-			
+
 			_, err = out.WriteString(line)
 			if err != nil {
 				slog.Error(err.Error())
@@ -100,17 +104,17 @@ func Run(remote string, dir *string) {
 		}
 
 		switch cmd {
-        case "End":
-            slog.Info("Session closed by user")
-            return
+		case "End":
+			slog.Info("Session closed by user")
+			return
 
-        case "List":
-            slog.Debug("Sending command: " + cmd + " " + value)
-            handleListClient(in, out)
+		case "List":
+			slog.Debug("Sending command: " + cmd + " " + value)
+			handleListClient(in, out, time)
 
-        case "Get":
-            slog.Debug("Sending command: " + cmd + " " + value)
-            handleGetClient(in, out, *dir, value)
+		case "Get":
+			slog.Debug("Sending command: " + cmd + " " + value)
+			handleGetClient(in, out, *dir, value, time)
 
 		case "Cd": // <--- NOUVEAU CAS POUR GÉRER LA RÉPONSE DE Cd
 			// Lit la réponse simple envoyée par le serveur (OK ou erreur)
@@ -120,36 +124,36 @@ func Run(remote string, dir *string) {
 				return
 			}
 			response = strings.TrimSpace(response)
-			
+
 			if response == "OK" {
 				fmt.Println("Répertoire courant mis à jour.")
 			} else {
 				fmt.Printf("Échec du changement de répertoire: %s\n", response)
 			}
 
-        // NOUVEAU BLOC : Gère la réponse des commandes admin
-        case "Terminate", "Hide", "Reveal":
-            // CORRECTION : On lit la réponse ici, APRÈS l'envoi.
-            response, err := in.ReadString('\n')
-            if err != nil {
-                // Si la lecture échoue, la connexion est probablement coupée par le serveur.
-                if cmd == "Terminate" {
-                    fmt.Println("Commande Terminate exécutée. Déconnexion forcée du client.")
-                } else {
-                    slog.Error(fmt.Sprintf("Connexion interrompue après %s: %s", cmd, err.Error()))
-                }
-                return // Quitter la session
-            }
+		// NOUVEAU BLOC : Gère la réponse des commandes admin
+		case "Terminate", "Hide", "Reveal":
+			// CORRECTION : On lit la réponse ici, APRÈS l'envoi.
+			response, err := in.ReadString('\n')
+			if err != nil {
+				// Si la lecture échoue, la connexion est probablement coupée par le serveur.
+				if cmd == "Terminate" {
+					fmt.Println("Commande Terminate exécutée. Déconnexion forcée du client.")
+				} else {
+					slog.Error(fmt.Sprintf("Connexion interrompue après %s: %s", cmd, err.Error()))
+				}
+				return // Quitter la session
+			}
 
-            response = strings.TrimSpace(response)
-            fmt.Printf("Serveur réponse (%s): %s\n", cmd, response)
+			response = strings.TrimSpace(response)
+			fmt.Printf("Serveur réponse (%s): %s\n", cmd, response)
 
-            // Si Terminate est un succès, on quitte le client
-            if cmd == "Terminate" && response == "OK" {
-                slog.Info("Serveur arrêté par Terminate. Déconnexion.")
-                return 
-            }
-        }
+			// Si Terminate est un succès, on quitte le client
+			if cmd == "Terminate" && response == "OK" {
+				slog.Info("Serveur arrêté par Terminate. Déconnexion.")
+				return
+			}
+		}
 	}
 }
 
@@ -184,8 +188,9 @@ func watchConnection(cancel context.CancelFunc, conn net.Conn) {
 * @param in : le reader pour lire les données du serveur
 * @param out : le writer pour envoyer des données au serveur
  */
-func handleListClient(in *bufio.Reader, out *bufio.Writer) {
+func handleListClient(in *bufio.Reader, out *bufio.Writer, timeout time.Duration) {
 	// Lecture de "FileCnt X"
+	start := time.Now()
 	header, err := in.ReadString('\n')
 	if err != nil {
 		slog.Error("Erreur réception FileCnt : " + err.Error())
@@ -223,11 +228,18 @@ func handleListClient(in *bufio.Reader, out *bufio.Writer) {
 		slog.Error("Erreur envoi OK : " + err.Error())
 		return
 	}
+	if time.Since(start) > timeout {
+		out.WriteString("Timeout atteint\n")
+		out.Flush()
+		return
+	}
 	out.Flush()
 }
 
-func handleGetClient(in *bufio.Reader, out *bufio.Writer, pathDir string, file string) {
+func handleGetClient(in *bufio.Reader, out *bufio.Writer, pathDir string, file string, timeout time.Duration) {
+	err := os.MkdirAll(pathDir, os.ModePerm)
 	//commence la recuperation du fichier.
+	start := time.Now()
 	slog.Debug("Demande de téléchargement du fichier : " + file)
 
 	// Lecture de la réponse du serveur
@@ -243,10 +255,10 @@ func handleGetClient(in *bufio.Reader, out *bufio.Writer, pathDir string, file s
 	slog.Debug("Réponse serveur : " + header)
 
 	if header != "Start" {
-        slog.Warn("Transfert annulé par le serveur: " + header)
-        // La transaction est terminée. On retourne au prompt principal.
-        return 
-    }
+		slog.Warn("Transfert annulé par le serveur: " + header)
+		// La transaction est terminée. On retourne au prompt principal.
+		return
+	}
 
 	// Lecture de la taille du fichier
 	fileSize, err := in.ReadString('\n')
@@ -271,7 +283,7 @@ func handleGetClient(in *bufio.Reader, out *bufio.Writer, pathDir string, file s
 
 	// Lire les données du fichier
 	receivedBytes := 0
-	buffer := make([]byte, 1024)
+	buffer := make([]byte, 1)
 	for receivedBytes < count {
 		n, err := in.Read(buffer)
 		if err != nil {
@@ -289,6 +301,11 @@ func handleGetClient(in *bufio.Reader, out *bufio.Writer, pathDir string, file s
 	_, err = out.WriteString("OK\n")
 	if err != nil {
 		slog.Error("Erreur envoi OK : " + err.Error())
+		return
+	}
+	if time.Since(start) > timeout {
+		out.WriteString("Timeout atteint\n")
+		out.Flush()
 		return
 	}
 	out.Flush()

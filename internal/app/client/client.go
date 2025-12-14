@@ -3,6 +3,7 @@ package client
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"os"
@@ -137,6 +138,10 @@ func handleListClient(in *bufio.Reader, out *bufio.Writer) {
 	// Lecture de "FileCnt X"
 	header, err := in.ReadString('\n')
 	if err != nil {
+		if err == io.EOF {
+			fmt.Println("Server closed connection")
+			os.Exit(0)
+		}
 		slog.Error("Erreur réception FileCnt : " + err.Error())
 		return
 	}
@@ -159,6 +164,7 @@ func handleListClient(in *bufio.Reader, out *bufio.Writer) {
 	for i := 0; i < count; i++ {
 		line, err := in.ReadString('\n')
 		if err != nil {
+			isDown(err)
 			slog.Error("Erreur lecture fichier : " + err.Error())
 			return
 		}
@@ -185,6 +191,7 @@ func handleGetClient(in *bufio.Reader, out *bufio.Writer, pathDir string, file s
 	header, err := in.ReadString('\n')
 	slog.Debug("header : " + header)
 	if err != nil {
+		isDown(err)
 		slog.Error("Erreur réception FileSize : " + err.Error())
 		return
 	}
@@ -202,6 +209,7 @@ func handleGetClient(in *bufio.Reader, out *bufio.Writer, pathDir string, file s
 	fileSize, err := in.ReadString('\n')
 	slog.Debug("fileSize : " + fileSize)
 	if err != nil {
+		isDown(err)
 		slog.Error("Erreur réception FileSize : " + err.Error())
 		return
 	}
@@ -225,6 +233,7 @@ func handleGetClient(in *bufio.Reader, out *bufio.Writer, pathDir string, file s
 	for receivedBytes < count {
 		n, err := in.Read(buffer)
 		if err != nil {
+			isDown(err)
 			slog.Error("Erreur lecture données fichier : " + err.Error())
 			return
 		}
@@ -244,6 +253,9 @@ func handleGetClient(in *bufio.Reader, out *bufio.Writer, pathDir string, file s
 	out.Flush()
 }
 
-func verifyConnecionToServer() {
-	//TODO -> doit verifier si le serveur renvoi EOF (ou autre) apres l'envoi d'une commande ou bien la reponse attendue.
+func isDown(err error) {
+	if err == io.EOF {
+		fmt.Println("Server closed connection")
+		os.Exit(0)
+	}
 }

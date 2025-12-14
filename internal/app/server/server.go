@@ -36,6 +36,10 @@ var (
 
 	adminActive    bool       // true si un admin est connecté
 	adminActiveMux sync.Mutex // Mutex pour protéger adminActive
+
+	// Per-connection busy tracking used to know which connections are currently executing a command
+	connBusy    map[net.Conn]bool
+	connBusyMux sync.Mutex
 )
 
 const (
@@ -77,7 +81,24 @@ func getIsCommandeUsed() bool {
 	return val
 }
 
-func RunServer(port *string, dir *string, time time.Duration) {
+// Helpers for per-connection busy state
+func setConnBusy(conn net.Conn, v bool) {
+	connBusyMux.Lock()
+	if connBusy == nil {
+		connBusy = make(map[net.Conn]bool)
+	}
+	connBusy[conn] = v
+	connBusyMux.Unlock()
+}
+
+func getConnBusy(conn net.Conn) bool {
+	connBusyMux.Lock()
+	v := connBusy[conn]
+	connBusyMux.Unlock()
+	return v
+}
+
+func RunServer(port *string, dir *string) {
 
 	cleanedRootDir := filepath.Clean(*dir)
 
@@ -88,6 +109,7 @@ func RunServer(port *string, dir *string, time time.Duration) {
 	terminateChan = make(chan struct{})
 	forceClientShutdown = make(chan struct{})   // Initialisation
 	activeConnections = make(map[net.Conn]bool) // Initialisation
+	connBusy = make(map[net.Conn]bool)          // Initialisation
 	serverWG.Add(1)                             // Le serveur principal doit être attendu
 
 	l, e := net.Listen("tcp", ":"+*port)
@@ -126,7 +148,7 @@ func RunServer(port *string, dir *string, time time.Duration) {
 			}
 			/* lancement d'une nouvelle go routine pour le client */
 			clientWG.Add(1) //  Incrémenter le WaitGroup avant de lancer la goroutine
-			go handleClient(c, cleanedRootDir, time)
+			go handleClient(c, cleanedRootDir)
 		}
 	}
 }
@@ -148,9 +170,10 @@ func checkForTerminate(l net.Listener) {
 	}
 }
 
-func RunAdminServer(port string, rootDir string, time time.Duration) {
+func RunAdminServer(port string, rootDir string) {
 
 	cleanedRootDir := filepath.Clean(rootDir)
+
 	l, e := net.Listen("tcp", ":"+port)
 	if e != nil {
 		slog.Error("Erreur lors de l'écoute du port d'administration", "port", port, "erreur", e.Error())
@@ -194,7 +217,7 @@ func RunAdminServer(port string, rootDir string, time time.Duration) {
 
 			// Les commandes Admin sont des clients comme les autres
 			clientWG.Add(1)
-			go handleAdminClient(c, cleanedRootDir, time)
+			go handleAdminClient(c, cleanedRootDir)
 		}
 	}
 }
@@ -202,7 +225,7 @@ func RunAdminServer(port string, rootDir string, time time.Duration) {
 /* fonction pour gérer les commandes  des tout les clients : list get et end  */
 // Ajouter cette nouvelle fonction dans server/server.go
 
-func handleAdminClient(c net.Conn, rootDir string, time time.Duration) {
+func handleAdminClient(c net.Conn, rootDir string) {
 
 	// Le comptage des clients (clientCount) reste dans handleClient pour les connexions classiques.
 	// Pour l'admin, on utilise seulement le WaitGroup.
@@ -212,6 +235,7 @@ func handleAdminClient(c net.Conn, rootDir string, time time.Duration) {
 	activeConnectionsMux.Lock()
 	activeConnections[c] = true
 	activeConnectionsMux.Unlock()
+
 	slog.Info("Incoming ADMIN connection from " + c.RemoteAddr().String())
 	defer func() {
 
@@ -259,7 +283,7 @@ func handleAdminClient(c net.Conn, rootDir string, time time.Duration) {
 				continue
 			}
 			filename := partie[1]
-			handleHide(writer, reader, currentDir, filename, time)
+			handleHide(writer, reader, currentDir, filename)
 		} else if commande == "Reveal" {
 			if len(partie) < 2 {
 				slog.Warn("commande incomplete: Reveal")
@@ -268,13 +292,13 @@ func handleAdminClient(c net.Conn, rootDir string, time time.Duration) {
 				continue
 			}
 			filename := partie[1]
-			handleReveal(writer, reader, currentDir, filename, time)
+			handleReveal(writer, reader, currentDir, filename)
 		} else if commande == "Terminate" {
 			// C'est le seul endroit où Terminate devrait être appelée
-			handleTerminate(writer, reader, time)
+			handleTerminate(c, writer, reader)
 			return
 		} else if commande == "List" {
-			handleList(writer, reader, currentDir, time)
+			handleList(c, writer, reader, currentDir)
 		} else if commande == "Cd" { // <-- NOUVELLE COMMANDE CD
 			if len(partie) < 2 {
 				slog.Warn("commande incomplete: Cd")
@@ -284,7 +308,7 @@ func handleAdminClient(c net.Conn, rootDir string, time time.Duration) {
 			}
 			targetDir := partie[1]
 			// Met à jour le répertoire courant
-			newDir := handleChangeDir(writer, currentDir, rootDir, targetDir, time)
+			newDir := handleChangeDir(c, writer, currentDir, rootDir, targetDir)
 			currentDir = newDir
 		} else {
 			slog.Warn("command ADMIN inconnue " + commandLine)
@@ -294,7 +318,7 @@ func handleAdminClient(c net.Conn, rootDir string, time time.Duration) {
 	}
 }
 
-func handleClient(c net.Conn, rootDir string, time time.Duration) {
+func handleClient(c net.Conn, rootDir string) {
 
 	currentDir := rootDir
 
@@ -353,14 +377,14 @@ func handleClient(c net.Conn, rootDir string, time time.Duration) {
 		/* commandes */
 
 		if commande == "List" {
-			handleList(writer, reader, currentDir, time)
+			handleList(c, writer, reader, currentDir)
 		} else if commande == "Get" {
 			if len(partie) < 2 {
 				slog.Warn("commande incomplete")
 				continue
 			}
 			filename := partie[1]
-			handleGet(writer, reader, currentDir, filename, time)
+			handleGet(c, writer, reader, currentDir, filename)
 		} else if commande == "Cd" { // <-- NOUVELLE COMMANDE CD
 			if len(partie) < 2 {
 				slog.Warn("commande incomplete: Cd")
@@ -370,7 +394,7 @@ func handleClient(c net.Conn, rootDir string, time time.Duration) {
 			}
 			targetDir := partie[1]
 			// Met à jour le répertoire courant
-			newDir := handleChangeDir(writer, currentDir, rootDir, targetDir, time)
+			newDir := handleChangeDir(c, writer, currentDir, rootDir, targetDir)
 			currentDir = newDir
 		} else if commande == "End" { // Seule commande de déconnexion client
 			slog.Info("Client" + c.RemoteAddr().String() + "veut se deconnecter")
@@ -382,63 +406,6 @@ func handleClient(c net.Conn, rootDir string, time time.Duration) {
 			writer.Flush()
 		}
 	}
-}
-
-func handleChangeDir(w *bufio.Writer, currentDir string, rootDir string, targetDir string, timeout time.Duration) string {
-	setIsCommandeUsed(true)
-	defer setIsCommandeUsed(false)
-	start := time.Now()
-	// assure que le client ne peut pas utiliser de chemins absolus
-	if filepath.IsAbs(targetDir) {
-		slog.Warn("Tentative d'utiliser un chemin absolu: " + targetDir)
-		w.WriteString("AbsolutePathsForbidden\n")
-		w.Flush()
-		return currentDir
-	}
-
-	// joint le répertoire courant et la cible, puis nettoyer
-	absTarget := filepath.Join(currentDir, targetDir)
-	cleanTarget := filepath.Clean(absTarget)
-
-	slog.Debug("Tentative de changement de dir vers : " + cleanTarget)
-
-	// assure que le client ne sort jamais du répertoire racine
-	/* if !strings.HasPrefix(cleanTarget, rootDir) {
-	    slog.Warn("Tentative de sortir du répertoire racine: " + cleanTarget)
-	    w.WriteString("AccessDenied\n")
-	    w.Flush()
-	    return currentDir
-	} */
-
-	fileInfo, err := os.Stat(cleanTarget)
-	if err != nil {
-		if os.IsNotExist(err) {
-			slog.Warn("Répertoire cible inconnu: " + cleanTarget)
-			w.WriteString("DirectoryUnknown\n")
-		} else {
-			slog.Error("Erreur Stat sur répertoire: " + err.Error())
-			w.WriteString("ServerError\n")
-		}
-		w.Flush()
-		return currentDir
-	}
-
-	if !fileInfo.IsDir() {
-		slog.Warn("La cible n'est pas un répertoire: " + cleanTarget)
-		w.WriteString("NotADirectory\n")
-		w.Flush()
-		return currentDir
-	}
-	if time.Since(start) > timeout {
-		w.WriteString("Timeout atteint\n")
-		w.Flush()
-		return currentDir
-	}
-	slog.Info(fmt.Sprintf("CWD mis à jour de %s à %s", currentDir, cleanTarget))
-	w.WriteString("OK\n")
-	w.Flush()
-
-	return cleanTarget // Retourne le nouveau chemin nettoyé
 }
 
 func buildTree(pathDir string, prefix string, messages *[]string, isRoot bool) error {
@@ -524,10 +491,13 @@ func buildTree(pathDir string, prefix string, messages *[]string, isRoot bool) e
 	return nil
 }
 
-func handleList(w *bufio.Writer, r *bufio.Reader, pathDir string, timeout time.Duration) {
+func handleList(c net.Conn, w *bufio.Writer, r *bufio.Reader, pathDir string) {
 	setIsCommandeUsed(true)
 	defer setIsCommandeUsed(false)
-	start := time.Now()
+
+	setConnBusy(c, true)
+	defer setConnBusy(c, false)
+
 	messages := []string{}
 
 	// Appel à la fonction récursive pour construire l'arborescence
@@ -560,20 +530,22 @@ func handleList(w *bufio.Writer, r *bufio.Reader, pathDir string, timeout time.D
 	// Attente du OK par le client
 	ok, err := r.ReadString('\n')
 	if err != nil || strings.TrimSpace(ok) != "OK" {
-		slog.Error("LE CLIENT N'A PAS RÉPONDU OK (erreur ou EOF): " + err.Error())
-		return
-	}
-	if time.Since(start) > timeout {
-		w.WriteString("Timeout atteint\n")
-		w.Flush()
+		if err != nil {
+			slog.Error("LE CLIENT N'A PAS RÉPONDU OK (erreur ou EOF): ", "err", err.Error())
+		} else {
+			slog.Error("LE CLIENT N'A PAS RÉPONDU OK (mauvaise réponse): ", "resp", strings.TrimSpace(ok))
+		}
 		return
 	}
 	slog.Debug("Le client a validé la réception avec OK")
 }
 
-func handleGet(w *bufio.Writer, r *bufio.Reader, pathDir string, filename string, timeout time.Duration) {
+func handleGet(c net.Conn, w *bufio.Writer, r *bufio.Reader, pathDir string, filename string) {
 	setIsCommandeUsed(true)
-	start := time.Now()
+
+	setConnBusy(c, true)
+	defer setConnBusy(c, false)
+
 	// TODO () : gérer les erreurs et les fichiers cachés
 	// TODO () : gérer les erreurs de path pas existants
 	// TODO () : gérer l'enregistrement des fichiers dans le repo voulu
@@ -640,14 +612,14 @@ func handleGet(w *bufio.Writer, r *bufio.Reader, pathDir string, filename string
 
 	ok, err := r.ReadString('\n')
 	if err != nil || strings.TrimSpace(ok) != "OK" {
-		slog.Error("LE CLIENT N'A PAS REPONDUS OK")
+		if err != nil {
+			slog.Error("LE CLIENT N'A PAS REPONDUS OK: ", "err", err.Error())
+		} else {
+			slog.Error("LE CLIENT N'A PAS REPONDUS OK (mauvaise réponse): ", "resp", strings.TrimSpace(ok))
+		}
 		return
 	}
-	if time.Since(start) > timeout {
-		w.WriteString("Timeout atteint\n")
-		w.Flush()
-		return
-	}
+
 	slog.Info("Fichier téléchargé",
 		"nom", filename,
 		"taille", n,
@@ -657,8 +629,8 @@ func handleGet(w *bufio.Writer, r *bufio.Reader, pathDir string, filename string
 	setIsCommandeUsed(false)
 }
 
-func handleHide(w *bufio.Writer, r *bufio.Reader, pathDir string, filename string, timeout time.Duration) {
-	start := time.Now()
+func handleHide(w *bufio.Writer, r *bufio.Reader, pathDir string, filename string) {
+
 	filePath := filepath.Join(pathDir, filename)
 	// Vérifie l'existence et le type du fichier
 	fileInfo, err := os.Stat(filePath)
@@ -678,18 +650,14 @@ func handleHide(w *bufio.Writer, r *bufio.Reader, pathDir string, filename strin
 		hiddenFiles[filename] = true
 		slog.Info("Element caché: " + filename)
 	}
-	if time.Since(start) > timeout {
-		w.WriteString("Timeout atteint\n")
-		w.Flush()
-		return
-	}
+
 	// Répondre OK
 	w.WriteString("OK\n")
 	w.Flush()
 }
 
-func handleReveal(w *bufio.Writer, r *bufio.Reader, pathDir string, filename string, timeout time.Duration) {
-	start := time.Now()
+func handleReveal(w *bufio.Writer, r *bufio.Reader, pathDir string, filename string) {
+
 	filePath := filepath.Join(pathDir, filename)
 
 	//Vérifie l'existence sur le disque
@@ -712,73 +680,111 @@ func handleReveal(w *bufio.Writer, r *bufio.Reader, pathDir string, filename str
 	} else {
 		slog.Debug("L'éelement " + filename + " n'était pas marqué comme caché.")
 	}
-	if time.Since(start) > timeout {
-		w.WriteString("Timeout atteint\n")
-		w.Flush()
-		return
-	}
+
 	//Répond OK
 	w.WriteString("OK\n")
 	w.Flush()
 }
 
-func handleTerminate(w *bufio.Writer, r *bufio.Reader, timeout time.Duration) {
-	start := time.Now()
-	slog.Warn("COMMANDE TERMINATE REÇUE. Début de l'arrêt ordonné.")
+func handleTerminate(adminConn net.Conn, w *bufio.Writer, r *bufio.Reader) {
 
-	// Vérifier le nombre de clients connectés
-	/* 	clientCountMux.Lock()
-	   	currentCount := clientCount
-	   	clientCountMux.Unlock() */
+	slog.Warn("COMMANDE TERMINATE REÇUE. Début de l'arrêt ordonné.")
 
 	terminateRequest = true
-	/*
-	 if currentCount > 0 {
-	 	slog.Warn(fmt.Sprintf("Impossible de terminer : %d clients sont encore connectés.", currentCount))
-	 	w.WriteString("TerminateRefused\n")
-	 	w.Flush()
-	 	return
-	 } */
 
-	slog.Warn("COMMANDE TERMINATE REÇUE. Début de l'arrêt ordonné.")
-
-	// Stopper l'écoute de RunServer
-	close(terminateChan)
+	// Stopper l'écoute de RunServer (ferme terminateChan only once)
+	select {
+	case <-terminateChan:
+		// already closed
+	default:
+		close(terminateChan)
+	}
 	slog.Info("Arrêt de l'écoute des nouvelles connexions.")
 
-	// Attend que tous les clients actifs terminent leurs commandes et se déconnectent.
-	/* clientWG.Wait() */
-	slog.Info("Tous les clients sont déconnectés. Serveur arrêté.")
+	// Boucle : fermer progressivement les connexions inactives (non-busy) sauf l'admin
+	for {
+		// Snapshot current non-admin connections
+		activeConnectionsMux.Lock()
+		conns := make([]net.Conn, 0, len(activeConnections))
+		for conn := range activeConnections {
+			if conn == adminConn {
+				continue
+			}
+			conns = append(conns, conn)
+		}
+		activeConnectionsMux.Unlock()
 
-	activeConnectionsMux.Lock()
-	// Créer une liste de connexions à fermer pour éviter les deadlocks si la map est modifiée ailleurs
-	connectionsToClose := make([]net.Conn, 0, len(activeConnections))
-	for conn := range activeConnections {
-		connectionsToClose = append(connectionsToClose, conn)
-	}
-	activeConnectionsMux.Unlock()
+		// Fermer les connexions inactives
+		for _, conn := range conns {
+			if !getConnBusy(conn) {
+				_ = conn.Close()
+			}
+		}
 
-	for conn, _ := range activeConnections {
-		conn.Close()
-		// L'appel à conn.Close() ici déclenche la fonction defer dans handleClient/handleAdminClient
-		// qui va décrémenter clientWG, mais nous avons déjà attendu clientWG.
+		// Vérifier s'il reste des clients non-admin
+		clientCountMux.Lock()
+		remaining := clientCount
+		clientCountMux.Unlock()
+
+		if remaining == 0 {
+			break
+		}
+
+		time.Sleep(100 * time.Millisecond)
 	}
-	slog.Info(fmt.Sprintf("%d connexions fermées par le serveur.", len(connectionsToClose)))
-	// Vider la map pour ne pas garder de références (même si os.Exit(0) arrive)
-	/* activeConnections = make(map[net.Conn]bool)
-	   activeConnectionsMux.Unlock() */
-	clientWG.Wait()
-	if time.Since(start) > timeout {
-		w.WriteString("Timeout atteint\n")
-		w.Flush()
-		return
-	}
-	//Envoie la confirmation au client de contrôle
+
+	// Tous les clients non-admin sont déconnectés: informer l'admin
 	w.WriteString("OK\n")
 	w.Flush()
 
-	// Arrêt du processus
-	/* serverWG.Wait() */
-	slog.Info("Processus serveur terminé.")
-	os.Exit(0) // Arrêter le processus Go
+	slog.Info("Tous les clients sont déconnectés. Serveur arrêté.")
+	os.Exit(0)
+}
+
+func handleChangeDir(c net.Conn, w *bufio.Writer, currentDir string, rootDir string, targetDir string) string {
+	setIsCommandeUsed(true)
+	defer setIsCommandeUsed(false)
+
+	setConnBusy(c, true)
+	defer setConnBusy(c, false)
+
+	// assure que le client ne peut pas utiliser de chemins absolus
+	if filepath.IsAbs(targetDir) {
+		slog.Warn("Tentative d'utiliser un chemin absolu: " + targetDir)
+		w.WriteString("AbsolutePathsForbidden\n")
+		w.Flush()
+		return currentDir
+	}
+
+	// joint le répertoire courant et la cible, puis nettoyer
+	absTarget := filepath.Join(currentDir, targetDir)
+	cleanTarget := filepath.Clean(absTarget)
+
+	slog.Debug("Tentative de changement de dir vers : " + cleanTarget)
+
+	fileInfo, err := os.Stat(cleanTarget)
+	if err != nil {
+		if os.IsNotExist(err) {
+			slog.Warn("Répertoire cible inconnu: " + cleanTarget)
+			w.WriteString("DirectoryUnknown\n")
+		} else {
+			slog.Error("Erreur Stat sur répertoire: " + err.Error())
+			w.WriteString("ServerError\n")
+		}
+		w.Flush()
+		return currentDir
+	}
+
+	if !fileInfo.IsDir() {
+		slog.Warn("La cible n'est pas un répertoire: " + cleanTarget)
+		w.WriteString("NotADirectory\n")
+		w.Flush()
+		return currentDir
+	}
+
+	slog.Info(fmt.Sprintf("CWD mis à jour de %s à %s", currentDir, cleanTarget))
+	w.WriteString("OK\n")
+	w.Flush()
+
+	return cleanTarget
 }

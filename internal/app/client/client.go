@@ -5,11 +5,9 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
-	"io"
-	"context"
 	"os"
 	"strings"
-	"time"
+
 	"gitlab.univ-nantes.fr/iutna.info2.r305/proj/internal/pkg/proto"
 )
 
@@ -18,7 +16,7 @@ import (
 *
 * @param remote : l'adresse du serveur distant
  */
-func Run(remote string, dir *string, timeout time.Duration) {
+func Run(remote string, dir *string) {
 
 	c, e := net.Dial("tcp", remote)
 	if e != nil {
@@ -37,38 +35,7 @@ func Run(remote string, dir *string, timeout time.Duration) {
 	out := bufio.NewWriter(c)
 	stdin := bufio.NewReader(os.Stdin)
 
-	//timeout de 1s
-	/* e = c.SetReadDeadline(time.Now().Add(10 * time.Second))
-	if e != nil {
-		return
-	}
- */
-	// contexte pour pouvoir arrêter proprement
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	// goroutine de surveillance de la connexion
-	go watchConnection(cancel, c)
-
-
-
 	for {
-
-		readDeadline := time.Now().Add(timeout)
-        e = c.SetReadDeadline(readDeadline)
-        if e != nil {
-             slog.Error("Erreur lors de la configuration du délai de lecture : " + e.Error())
-             return
-        }
-
-		// on sort si la connexion est détectée comme morte
-		select {
-		case <-ctx.Done():
-			slog.Warn("Connexion perdue, fermeture du client")
-			return
-		default:
-		}
-
 
 		fmt.Print("> ")
 
@@ -112,11 +79,11 @@ func Run(remote string, dir *string, timeout time.Duration) {
 
 		case "List":
 			slog.Debug("Sending command: " + cmd + " " + value)
-			handleListClient(in, out, timeout)
+			handleListClient(in, out)
 
 		case "Get":
 			slog.Debug("Sending command: " + cmd + " " + value)
-			handleGetClient(in, out, *dir, value, timeout)
+			handleGetClient(in, out, *dir, value)
 
 		case "Cd": // <--- NOUVEAU CAS POUR GÉRER LA RÉPONSE DE Cd
 			// Lit la réponse simple envoyée par le serveur (OK ou erreur)
@@ -159,40 +126,14 @@ func Run(remote string, dir *string, timeout time.Duration) {
 	}
 }
 
-
-// lit périodiquement un octet pour détecter la fermeture de la connexion
-func watchConnection(cancel context.CancelFunc, conn net.Conn) {
-	defer cancel()
-	for {
-		_, err := conn.Read(make([]byte, 1))
-		if err != nil {
-			if ne, ok := err.(net.Error); ok && ne.Timeout() {
-				continue
-			}
-			if err == io.EOF {
-				slog.Info("Connexion fermée par le serveur (EOF)")
-				err := conn.Close()
-				if err != nil {
-					return
-				}
-				os.Exit(0)
-			}
-
-			slog.Error("Erreur de lecture sur la connexion: " + err.Error())
-			return
-		}
-	}
-}
-
 /*
 * La fonction handleListClient permet de gérer la commande List côté client
 *
 * @param in : le reader pour lire les données du serveur
 * @param out : le writer pour envoyer des données au serveur
  */
-func handleListClient(in *bufio.Reader, out *bufio.Writer, timeout time.Duration) {
+func handleListClient(in *bufio.Reader, out *bufio.Writer) {
 	// Lecture de "FileCnt X"
-	start := time.Now()
 	header, err := in.ReadString('\n')
 	if err != nil {
 		slog.Error("Erreur réception FileCnt : " + err.Error())
@@ -230,18 +171,12 @@ func handleListClient(in *bufio.Reader, out *bufio.Writer, timeout time.Duration
 		slog.Error("Erreur envoi OK : " + err.Error())
 		return
 	}
-	if time.Since(start) > timeout {
-		out.WriteString("Timeout atteint\n")
-		out.Flush()
-		return
-	}
 	out.Flush()
 }
 
-func handleGetClient(in *bufio.Reader, out *bufio.Writer, pathDir string, file string, timeout time.Duration) {
+func handleGetClient(in *bufio.Reader, out *bufio.Writer, pathDir string, file string) {
 	err := os.MkdirAll(pathDir, os.ModePerm)
 	//commence la recuperation du fichier.
-	start := time.Now()
 	slog.Debug("Demande de téléchargement du fichier : " + file)
 
 	// Lecture de la réponse du serveur
@@ -285,7 +220,7 @@ func handleGetClient(in *bufio.Reader, out *bufio.Writer, pathDir string, file s
 
 	// Lire les données du fichier
 	receivedBytes := 0
-	buffer := make([]byte, 1)
+	buffer := make([]byte, 8)
 	for receivedBytes < count {
 		n, err := in.Read(buffer)
 		if err != nil {
@@ -305,10 +240,9 @@ func handleGetClient(in *bufio.Reader, out *bufio.Writer, pathDir string, file s
 		slog.Error("Erreur envoi OK : " + err.Error())
 		return
 	}
-	if time.Since(start) > timeout {
-		out.WriteString("Timeout atteint\n")
-		out.Flush()
-		return
-	}
 	out.Flush()
+}
+
+func verifyConnecionToServer() {
+	//TODO -> doit verifier si le serveur renvoi EOF (ou autre) apres l'envoi d'une commande ou bien la reponse attendue.
 }

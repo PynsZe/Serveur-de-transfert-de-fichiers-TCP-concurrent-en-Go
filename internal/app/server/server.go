@@ -98,7 +98,7 @@ func getConnBusy(conn net.Conn) bool {
 	return v
 }
 
-func RunServer(port *string, dir *string) {
+func RunServer(port *string, dir *string, duration time.Duration) {
 
 	cleanedRootDir := filepath.Clean(*dir)
 
@@ -170,7 +170,7 @@ func checkForTerminate(l net.Listener) {
 	}
 }
 
-func RunAdminServer(port string, rootDir string) {
+func RunAdminServer(port string, rootDir string, duration time.Duration) {
 
 	cleanedRootDir := filepath.Clean(rootDir)
 

@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"strings"
+	"time"
 
 	"gitlab.univ-nantes.fr/iutna.info2.r305/proj/internal/pkg/proto"
 )
@@ -16,7 +17,7 @@ import (
 *
 * @param remote : l'adresse du serveur distant
  */
-func Run(remote string, dir *string) {
+func Run(remote string, dir *string, duration time.Duration) {
 
 	c, e := net.Dial("tcp", remote)
 	if e != nil {

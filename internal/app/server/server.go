@@ -292,28 +292,6 @@ func handleClient(c net.Conn, rootDir string, duration time.Duration) {
 		} else if commande == "End" {
 			slog.Info("Client" + c.RemoteAddr().String() + "veut se deconnecter")
 			break // Sort de la boucle
-			// Gestion des commandes admin (elles devraient être gérées ici si le client les envoie)
-		} else if commande == "Hide" {
-			if len(partie) < 2 {
-				slog.Warn("commande incomplete: Hide")
-				writer.WriteString("CommandIncomplete\n")
-				writer.Flush()
-				continue
-			}
-			filename := partie[1]
-			handleHide(writer, reader, currentDir, filename, duration)
-		} else if commande == "Reveal" {
-			if len(partie) < 2 {
-				slog.Warn("commande incomplete: Reveal")
-				writer.WriteString("CommandIncomplete\n")
-				writer.Flush()
-				continue
-			}
-			filename := partie[1]
-			handleReveal(writer, reader, currentDir, filename, duration)
-		} else if commande == "Terminate" {
-			handleTerminate(c, writer) // Terminate ferme le serveur et la connexion
-			return                     // Termine immédiatement la goroutine
 		} else {
 			slog.Warn("command inconnue " + commandLine)
 			writer.WriteString("UnknownCommand\n")

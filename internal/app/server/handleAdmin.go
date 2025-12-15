@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-func handleAdminClient(c net.Conn, rootDir string) {
+func handleAdminClient(c net.Conn, rootDir string, duration time.Duration) {
 
 	// Le comptage des clients (clientCount) reste dans handleClient pour les connexions classiques.
 	// Pour l'admin, on utilise seulement le WaitGroup.
@@ -68,7 +68,7 @@ func handleAdminClient(c net.Conn, rootDir string) {
 				continue
 			}
 			filename := partie[1]
-			handleHide(writer, reader, currentDir, filename)
+			handleHide(writer, reader, currentDir, filename, duration)
 		} else if commande == "Reveal" {
 			if len(partie) < 2 {
 				slog.Warn("commande incomplete: Reveal")
@@ -77,13 +77,13 @@ func handleAdminClient(c net.Conn, rootDir string) {
 				continue
 			}
 			filename := partie[1]
-			handleReveal(writer, reader, currentDir, filename)
+			handleReveal(writer, reader, currentDir, filename, duration)
 		} else if commande == "Terminate" {
 			// C'est le seul endroit où Terminate devrait être appelée
 			handleTerminate(c, writer)
 			return
 		} else if commande == "List" {
-			handleList(c, writer, reader, currentDir)
+			handleList(c, writer, reader, currentDir, duration)
 		} else if commande == "Cd" { // <-- NOUVELLE COMMANDE CD
 			if len(partie) < 2 {
 				slog.Warn("commande incomplete: Cd")
@@ -93,7 +93,7 @@ func handleAdminClient(c net.Conn, rootDir string) {
 			}
 			targetDir := partie[1]
 			// Met à jour le répertoire courant
-			newDir := handleChangeDir(c, writer, currentDir, rootDir, targetDir)
+			newDir := handleChangeDir(c, writer, currentDir, rootDir, targetDir, duration)
 			currentDir = newDir
 		} else {
 			slog.Warn("command ADMIN inconnue " + commandLine)
@@ -150,7 +150,7 @@ func RunAdminServer(port string, rootDir string, duration time.Duration) {
 
 			// Les commandes Admin sont des clients comme les autres
 			clientWG.Add(1)
-			go handleAdminClient(c, cleanedRootDir)
+			go handleAdminClient(c, cleanedRootDir, duration)
 		}
 	}
 }

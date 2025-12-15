@@ -81,11 +81,11 @@ func Run(remote string, dir *string, duration time.Duration) {
 
 		case "List":
 			slog.Debug("Sending command: " + cmd + " " + value)
-			handleListClient(in, out)
+			handleListClient(in, out, duration)
 
 		case "Get":
 			slog.Debug("Sending command: " + cmd + " " + value)
-			handleGetClient(in, out, *dir, value)
+			handleGetClient(in, out, *dir, value, duration)
 
 		case "Cd": // <--- NOUVEAU CAS POUR GÉRER LA RÉPONSE DE Cd
 			// Lit la réponse simple envoyée par le serveur (OK ou erreur)
@@ -134,7 +134,8 @@ func Run(remote string, dir *string, duration time.Duration) {
 * @param in : le reader pour lire les données du serveur
 * @param out : le writer pour envoyer des données au serveur
  */
-func handleListClient(in *bufio.Reader, out *bufio.Writer) {
+func handleListClient(in *bufio.Reader, out *bufio.Writer, duration time.Duration) {
+	start := time.Now()
 	// Lecture de "FileCnt X"
 	header, err := in.ReadString('\n')
 	if err != nil {
@@ -170,7 +171,11 @@ func handleListClient(in *bufio.Reader, out *bufio.Writer) {
 		}
 		fmt.Print(line)
 	}
-
+	if time.Since(start) > duration {
+		out.WriteString("Timeout atteint\n")
+		out.Flush()
+		return
+	}
 	// Une fois la liste reçue → envoyer OK
 	slog.Debug("→ Envoi OK")
 	_, err = out.WriteString("OK\n")
@@ -181,7 +186,8 @@ func handleListClient(in *bufio.Reader, out *bufio.Writer) {
 	out.Flush()
 }
 
-func handleGetClient(in *bufio.Reader, out *bufio.Writer, pathDir string, file string) {
+func handleGetClient(in *bufio.Reader, out *bufio.Writer, pathDir string, file string, duration time.Duration) {
+	start := time.Now()
 	err := os.MkdirAll(pathDir, os.ModePerm)
 	//commence la recuperation du fichier.
 	slog.Debug("Demande de téléchargement du fichier : " + file)
@@ -240,7 +246,11 @@ func handleGetClient(in *bufio.Reader, out *bufio.Writer, pathDir string, file s
 		f.Write(buffer[:n])
 		receivedBytes += n
 	}
-
+	if time.Since(start) > duration {
+		out.WriteString("Timeout atteint\n")
+		out.Flush()
+		return
+	}
 	fmt.Printf("Fichier %s téléchargé (%d octets)\n", file, count)
 
 	// Une fois la liste reçue → envoyer OK

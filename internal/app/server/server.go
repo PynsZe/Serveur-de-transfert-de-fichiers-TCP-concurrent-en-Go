@@ -168,7 +168,7 @@ func RunServer(port *string, dir *string, duration time.Duration) {
 			}
 			/* lancement d'une nouvelle go routine pour le client */
 			clientWG.Add(1) //  Incrémenter le WaitGroup avant de lancer la goroutine
-			go handleClient(c, cleanedRootDir)
+			go handleClient(c, cleanedRootDir, duration)
 		}
 	}
 }
@@ -179,7 +179,7 @@ func RunServer(port *string, dir *string, duration time.Duration) {
 * @param c : la connexion réseau avec le client
 * @param rootDir : le répertoire racine des fichiers à servir
  */
-func handleClient(c net.Conn, rootDir string) {
+func handleClient(c net.Conn, rootDir string, duration time.Duration) {
 
 	currentDir := rootDir
 
@@ -234,14 +234,14 @@ func handleClient(c net.Conn, rootDir string) {
 		/* commandes */
 
 		if commande == "List" {
-			handleList(c, writer, reader, currentDir)
+			handleList(c, writer, reader, currentDir, duration)
 		} else if commande == "Get" {
 			if len(partie) < 2 {
 				slog.Warn("commande incomplete")
 				continue
 			}
 			filename := partie[1]
-			handleGet(c, writer, reader, currentDir, filename)
+			handleGet(c, writer, reader, currentDir, filename, duration)
 		} else if commande == "Cd" { // <-- NOUVELLE COMMANDE CD
 			if len(partie) < 2 {
 				slog.Warn("commande incomplete: Cd")
@@ -251,7 +251,7 @@ func handleClient(c net.Conn, rootDir string) {
 			}
 			targetDir := partie[1]
 			// Met à jour le répertoire courant
-			newDir := handleChangeDir(c, writer, currentDir, rootDir, targetDir)
+			newDir := handleChangeDir(c, writer, currentDir, rootDir, targetDir, duration)
 			currentDir = newDir
 		} else if commande == "End" { // Seule commande de déconnexion client
 			slog.Info("Client" + c.RemoteAddr().String() + "veut se deconnecter")
@@ -273,7 +273,8 @@ func handleClient(c net.Conn, rootDir string) {
 * @param r : le reader pour lire les données du client
 * @param pathDir : le répertoire courant du client
  */
-func handleList(c net.Conn, w *bufio.Writer, r *bufio.Reader, pathDir string) {
+func handleList(c net.Conn, w *bufio.Writer, r *bufio.Reader, pathDir string, duration time.Duration) {
+	start := time.Now()
 	setIsCommandeUsed(true)
 	defer setIsCommandeUsed(false)
 
@@ -308,7 +309,11 @@ func handleList(c net.Conn, w *bufio.Writer, r *bufio.Reader, pathDir string) {
 
 	w.Flush()
 	slog.Debug(fmt.Sprintf("%d lignes d'arborescence envoyées", count))
-
+	if time.Since(start) > duration {
+		w.WriteString("Timeout atteint\n")
+		w.Flush()
+		return
+	}
 	// Attente du OK par le client
 	ok, err := r.ReadString('\n')
 	if err != nil || strings.TrimSpace(ok) != "OK" {
@@ -331,7 +336,8 @@ func handleList(c net.Conn, w *bufio.Writer, r *bufio.Reader, pathDir string) {
 * @param pathDir : le répertoire courant du client
 * @param filename : le nom du fichier à envoyer
  */
-func handleGet(c net.Conn, w *bufio.Writer, r *bufio.Reader, pathDir string, filename string) {
+func handleGet(c net.Conn, w *bufio.Writer, r *bufio.Reader, pathDir string, filename string, duration time.Duration) {
+	start := time.Now()
 	setIsCommandeUsed(true)
 
 	setConnBusy(c, true)
@@ -396,7 +402,11 @@ func handleGet(c net.Conn, w *bufio.Writer, r *bufio.Reader, pathDir string, fil
 	slog.Debug(fmt.Sprintf("Transfert terminé %d octets envoyés", n))
 
 	/* attente du ok par le client */
-
+	if time.Since(start) > duration {
+		w.WriteString("Timeout atteint\n")
+		w.Flush()
+		return
+	}
 	ok, err := r.ReadString('\n')
 	if err != nil || strings.TrimSpace(ok) != "OK" {
 		if err != nil {
@@ -428,8 +438,8 @@ func handleGet(c net.Conn, w *bufio.Writer, r *bufio.Reader, pathDir string, fil
 * @param pathDir : le répertoire courant du client
 * @param filename : le nom du fichier à cacher
  */
-func handleHide(w *bufio.Writer, r *bufio.Reader, pathDir string, filename string) {
-
+func handleHide(w *bufio.Writer, r *bufio.Reader, pathDir string, filename string, duration time.Duration) {
+	start := time.Now()
 	filePath := filepath.Join(pathDir, filename)
 	// Vérifie l'existence et le type du fichier
 	fileInfo, err := os.Stat(filePath)
@@ -449,7 +459,11 @@ func handleHide(w *bufio.Writer, r *bufio.Reader, pathDir string, filename strin
 		hiddenFiles[filename] = true
 		slog.Info("Element caché: " + filename)
 	}
-
+	if time.Since(start) > duration {
+		w.WriteString("Timeout atteint\n")
+		w.Flush()
+		return
+	}
 	// Répondre OK
 	w.WriteString("OK\n")
 	w.Flush()
@@ -463,8 +477,8 @@ func handleHide(w *bufio.Writer, r *bufio.Reader, pathDir string, filename strin
 * @param pathDir : le répertoire courant du client
 * @param filename : le nom du fichier à révéler
  */
-func handleReveal(w *bufio.Writer, r *bufio.Reader, pathDir string, filename string) {
-
+func handleReveal(w *bufio.Writer, r *bufio.Reader, pathDir string, filename string, duration time.Duration) {
+	start := time.Now()
 	filePath := filepath.Join(pathDir, filename)
 
 	//Vérifie l'existence sur le disque
@@ -487,7 +501,11 @@ func handleReveal(w *bufio.Writer, r *bufio.Reader, pathDir string, filename str
 	} else {
 		slog.Debug("L'éelement " + filename + " n'était pas marqué comme caché.")
 	}
-
+	if time.Since(start) > duration {
+		w.WriteString("Timeout atteint\n")
+		w.Flush()
+		return
+	}
 	//Répond OK
 	w.WriteString("OK\n")
 	w.Flush()
@@ -686,7 +704,8 @@ func buildTree(pathDir string, prefix string, messages *[]string, isRoot bool) e
 *
 * @return : le nouveau répertoire courant après le changement (ou l'ancien en cas d'erreur)
  */
-func handleChangeDir(c net.Conn, w *bufio.Writer, currentDir string, rootDir string, targetDir string) string {
+func handleChangeDir(c net.Conn, w *bufio.Writer, currentDir string, rootDir string, targetDir string, duration time.Duration) string {
+	start := time.Now()
 	setIsCommandeUsed(true)
 	defer setIsCommandeUsed(false)
 
@@ -726,7 +745,11 @@ func handleChangeDir(c net.Conn, w *bufio.Writer, currentDir string, rootDir str
 		w.Flush()
 		return currentDir
 	}
-
+	if time.Since(start) > duration {
+		w.WriteString("Timeout atteint\n")
+		w.Flush()
+		return ""
+	}
 	slog.Info(fmt.Sprintf("CWD mis à jour de %s à %s", currentDir, cleanTarget))
 	w.WriteString("OK\n")
 	w.Flush()

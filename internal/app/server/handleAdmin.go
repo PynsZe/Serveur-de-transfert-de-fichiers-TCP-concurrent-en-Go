@@ -11,6 +11,7 @@ import (
 	// Les imports sync (Mutex, WaitGroup, Channel) sont dans le fichier `server.go` principal.
 )
 
+
 /* ====================================================
                   GESTION DU CLIENT ADMINISTRATEUR
 ==================================================== */
@@ -26,20 +27,17 @@ import (
  */
 func handleAdminClient(c net.Conn, rootDir string, duration time.Duration) {
 
-	// Note sur clientCount : Le compteur global de clients (clientCount) n'est pas incrémenté ici
-	// pour que `displayClientCount` n'affiche que le nombre de connexions "utilisateurs" classiques.
-
 	currentDir := rootDir // Répertoire courant de l'administrateur
 
 	// 1. Ajout à la liste des connexions actives (pour être surveillé par Terminate)
 	activeConnectionsMux.Lock()
-	activeConnections[c] = true
+	activeConnections[c] = true // Marque cette connexion comme active
 	activeConnectionsMux.Unlock()
 
 	slog.Info("Incoming ADMIN connection from " + c.RemoteAddr().String())
 	// 2. Logique de nettoyage à la fin de la goroutine (defer)
 	defer func() {
-		// **SYNCHRONISATION (Mutex)** : Déverrouille le statut admin (permet une nouvelle connexion admin)
+		// SYNCHRONISATION (Mutex): Déverrouille le statut admin (permet une nouvelle connexion admin)
 		adminActiveMux.Lock()
 		adminActive = false
 		adminActiveMux.Unlock()
@@ -51,7 +49,7 @@ func handleAdminClient(c net.Conn, rootDir string, duration time.Duration) {
 
 		c.Close()
 		slog.Info("ADMIN Connexion closed for" + c.RemoteAddr().String())
-		// **SYNCHRONISATION (WaitGroup)** : Indique que cette goroutine est terminée
+		// SYNCHRONISATION (WaitGroup) : Indique que cette goroutine est terminée
 		clientWG.Done()
 	}()
 
@@ -60,7 +58,7 @@ func handleAdminClient(c net.Conn, rootDir string, duration time.Duration) {
 
 	// 3. Boucle de lecture des commandes
 	for {
-		commandLine, err := reader.ReadString('\n')
+		commandLine, err := reader.ReadString('\n') // Lit jusqu'au saut de ligne
 		if err != nil {
 			if err != io.EOF {
 				slog.Error("N'a pas pu lire la commande ADMIN" + err.Error())
@@ -68,18 +66,17 @@ func handleAdminClient(c net.Conn, rootDir string, duration time.Duration) {
 			break // Sort de la boucle, déclenchant le `defer`
 		}
 
-		commandLine = strings.TrimSpace(commandLine)
+		commandLine = strings.TrimSpace(commandLine) // Enlève les espaces superflus
 		slog.Debug("Commande ADMIN reçu :" + commandLine)
 
-		partie := strings.Fields(commandLine)
+		partie := strings.Fields(commandLine) // Décompose la commande en parties
 		if len(partie) == 0 {
 			slog.Info("C'est vide")
 			continue
 		}
 		commande := partie[0]
 
-		// --- COMMANDES D'ADMINISTRATION et partagées ---
-
+		/*--- COMMANDES POUR CACHER UN FICHIER / REPERTOIRE ---*/
 		if commande == "Hide" {
 			if len(partie) < 2 {
 				slog.Warn("commande incomplete: Hide")
@@ -89,6 +86,7 @@ func handleAdminClient(c net.Conn, rootDir string, duration time.Duration) {
 			}
 			filename := partie[1]
 			handleHide(writer, reader, currentDir, filename, duration)
+		/*--- COMMANDES POUR AFFICHER UN FICHIER / REPERTOIRE ---*/
 		} else if commande == "Reveal" {
 			if len(partie) < 2 {
 				slog.Warn("commande incomplete: Reveal")
@@ -98,15 +96,16 @@ func handleAdminClient(c net.Conn, rootDir string, duration time.Duration) {
 			}
 			filename := partie[1]
 			handleReveal(writer, reader, currentDir, filename, duration)
+		/*--- COMMANDES POUR FERMER LE SERVEUR ---*/
 		} else if commande == "Terminate" {
-			// L'exécution de Terminate arrête l'intégralité du processus serveur (os.Exit)
+			// L'exécution de Terminate arrête l'intégralité du processus serveur
 			handleTerminate(c, writer)
 			return // Termine immédiatement la goroutine
+		/*--- COMMANDES POUR LISTE LES FICHIERS / REPERTOIRE ---*/
 		} else if commande == "List" {
-			// L'admin peut aussi demander la liste des fichiers
 			handleList(c, writer, reader, currentDir, duration)
-			// L'admin peut aussi changer de répertoire courant
-		} else if commande == "Cd" { // <-- NOUVELLE COMMANDE CD
+		/*--- COMMANDES POUR SE DEPLACER DANS L'ARBORESCENCE ---*/
+		} else if commande == "Cd" {
 			if len(partie) < 2 {
 				slog.Warn("commande incomplete: Cd")
 				writer.WriteString("CommandIncomplete\n")
@@ -139,7 +138,7 @@ func handleAdminClient(c net.Conn, rootDir string, duration time.Duration) {
  */
 func RunAdminServer(port string, rootDir string, duration time.Duration) {
 
-	cleanedRootDir := filepath.Clean(rootDir)
+	cleanedRootDir := filepath.Clean(rootDir) // Nettoie le chemin du répertoire racine
 
 	// 1. Démarrage de l'écoute TCP
 	l, e := net.Listen("tcp", ":"+port)
@@ -152,10 +151,10 @@ func RunAdminServer(port string, rootDir string, duration time.Duration) {
 
 	// 2. Boucle d'acceptation des connexions
 	for {
-		// **SYNCHRONISATION (Channel)** : Écoute le canal de terminaison
+		// SYNCHRONISATION (Channel) : Écoute le canal de terminaison
 		select {
 		case <-terminateChan:
-			// Signal reçu, fermer l'écoute et sortir
+			// Si une terminaison est demandée, ferme le listener et quitte
 			l.Close()
 			return
 		default:
@@ -171,13 +170,12 @@ func RunAdminServer(port string, rootDir string, duration time.Duration) {
 			}
 
 			// 3. Gestion de la connexion unique de l'admin
-			// **SYNCHRONISATION (Mutex)** : Protège l'accès à `adminActive`
+			// SYNCHRONISATION (Mutex): Protège l'accès à `adminActive`
 			adminActiveMux.Lock()
 			if adminActive {
 				// Si un admin est déjà connecté, on refuse la nouvelle connexion
 				adminActiveMux.Unlock()
 				slog.Warn("Tentative de connexion ADMIN multiple. Refus de " + c.RemoteAddr().String())
-
 				c.Write([]byte("AdminConnectionRefused\n"))
 				c.Close()
 				continue
@@ -188,7 +186,7 @@ func RunAdminServer(port string, rootDir string, duration time.Duration) {
 			adminActiveMux.Unlock()
 
 			// 4. Lancement de la goroutine de gestion
-			// **SYNCHRONISATION (WaitGroup)** : Incrémente pour la nouvelle goroutine admin
+			// SYNCHRONISATION (WaitGroup): Incrémente pour la nouvelle goroutine admin
 			clientWG.Add(1)
 			go handleAdminClient(c, cleanedRootDir, duration)
 		}

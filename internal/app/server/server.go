@@ -18,33 +18,40 @@ import (
 ==================================================== */
 
 var (
-	clientCount      int
-	terminateRequest bool            // Flag : requete pour terminer le serveur
+	// CLIENT 
+	clientCount      int			// pour compter le nombre de client ( non admin sur un serveur )
 	clientCountMux   sync.Mutex      // Mutex pour protéger l'accès concurrent à `clientCount`
-	hiddenFiles      map[string]bool // map[filename] -> true (fichiers cachés, hors .*)
+
+
+	//FICHIER-DIR CACHEE
+	hiddenFiles      map[string]bool // bool pour dire si un ficher/dir est cachés : map[filename] -> true (fichiers cachés, hors .*)
 	hiddenFilesMux   sync.Mutex      // Mutex pour protéger l'accès concurrent à `hiddenFiles`
+
+	// TERMINATE
 	terminateChan    chan struct{}   // Canal utilisé pour signaler l'arrêt à `RunServer` (fermé pour signaler)
+	terminateRequest bool            // requete pour terminer le serveur
+
 	serverWG         sync.WaitGroup  // WaitGroup pour attendre la fin de la goroutine `RunServer`
 	clientWG         sync.WaitGroup  // WaitGroup pour attendre que tous les `handleClient` se terminent
 
-	isCommandeUsed    bool       // Flag : true si au moins une commande List/Get/Cd/Admin est en cours d'exécution
+	// COMMANDES ACTIVES
+	isCommandeUsed    bool       // true si au moins une commande List/Get/Cd/Admin est en cours d'exécution
 	isCommandeUsedMux sync.Mutex // Mutex pour protéger l'accès concurrent à `isCommandeUsed`
 
-	forceClientShutdown chan struct{} // Non utilisé dans la logique actuelle, prévu pour forcer la fermeture des clients
-
-	// Liste des connexions actives
-	activeConnections    map[net.Conn]bool
+	// CONNECTIONS ACTIVES
+	activeConnections    map[net.Conn]bool // liste des connexions actives 
 	activeConnectionsMux sync.Mutex // Mutex pour protéger l'accès concurrent à `activeConnections`
+	connBusy    map[net.Conn]bool	// Suivi de l'activité par connexion : map[connexion] -> true (connexion en train d'exécuter une commande)
+	connBusyMux sync.Mutex // Mutex pour protéger l'accès concurrent à `connBusy`
 
-	adminActive    bool       // Flag : true si un client est connecté en tant qu'administrateur (non utilisé dans l'implémentation donnée)
+	// POUR SERVEUR ADMIN
+	adminActive    bool       // true si un client est connecté en tant qu'administrateur
 	adminActiveMux sync.Mutex // Mutex pour protéger l'accès concurrent à `adminActive`
 
-	// Suivi de l'activité par connexion : map[connexion] -> true (connexion en train d'exécuter une commande)
-	connBusy    map[net.Conn]bool
-	connBusyMux sync.Mutex // Mutex pour protéger l'accès concurrent à `connBusy`
 )
 
 const (
+	// CONST UTILES POUR BUILDTREE
 	DirPrefix     = "├── " // Préfixe pour tous les éléments sauf le dernier
 	LastDirPrefix = "└── " // Préfixe pour le dernier élément d'une liste
 	ChildPrefix   = "│   " // Préfixe pour l'indentation des enfants (continue)
@@ -82,29 +89,17 @@ func displayClientCount() {
 * Utilisé par les handlers de commande (List, Get, Cd, etc.).
  */
 func setIsCommandeUsed(val bool) {
-	// **SYNCHRONISATION (Mutex)** : Verrouille pour écrire dans `isCommandeUsed`
+	// SYNCHRONISATION (Mutex) : Verrouille pour écrire dans `isCommandeUsed`
 	isCommandeUsedMux.Lock()
 	isCommandeUsed = val
 	isCommandeUsedMux.Unlock()
 }
 
 /*
-* getIsCommandeUsed retourne si une commande est actuellement utilisée sur le serveur.
-* Utilisé par `checkForTerminate`.
- */
-func getIsCommandeUsed() bool {
-	// **SYNCHRONISATION (Mutex)** : Verrouille pour lire dans `isCommandeUsed`
-	isCommandeUsedMux.Lock()
-	val := isCommandeUsed
-	isCommandeUsedMux.Unlock()
-	return val
-}
-
-/*
 * setConnBusy définit si la connexion donnée est occupée par une commande en cours d'exécution.
  */
 func setConnBusy(conn net.Conn, v bool) {
-	// **SYNCHRONISATION (Mutex)** : Verrouille pour modifier `connBusy`
+	// SYNCHRONISATION (Mutex) : Verrouille pour modifier `connBusy`
 	connBusyMux.Lock()
 	if connBusy == nil {
 		connBusy = make(map[net.Conn]bool)
@@ -117,7 +112,7 @@ func setConnBusy(conn net.Conn, v bool) {
 * getConnBusy retourne si la connexion donnée est occupée par une commande en cours d'exécution.
  */
 func getConnBusy(conn net.Conn) bool {
-	// **SYNCHRONISATION (Mutex)** : Verrouille pour lire dans `connBusy`
+	// SYNCHRONISATION (Mutex): Verrouille pour lire dans `connBusy`
 	connBusyMux.Lock()
 	v := connBusy[conn]
 	connBusyMux.Unlock()
@@ -133,22 +128,26 @@ func getConnBusy(conn net.Conn) bool {
 *
 * @param port : le port d'écoute du serveur
 * @param dir : le répertoire racine des fichiers à servir
-* @param duration : la durée maximale d'attente (non utilisée ici)
+* @param duration : la durée maximale d'attente
  */
 func RunServer(port *string, dir *string, duration time.Duration) {
 
-	cleanedRootDir := filepath.Clean(*dir)
+	cleanedRootDir := filepath.Clean(*dir) // sert a nettoyer le repertoire
 
-	// Initialisations des structures globales
+	// Initialisations des structures globales ( fichier cachés )
 	if hiddenFiles == nil {
 		hiddenFiles = make(map[string]bool)
 	}
-	// **SYNCHRONISATION (Channel)** : Crée le canal de terminaison
+
+	// SYNCHRONISATION (Channel) : Crée le canal de terminaison
 	terminateChan = make(chan struct{})
-	forceClientShutdown = make(chan struct{})
+	
+	// Initialisation des structures pour les connections
 	activeConnections = make(map[net.Conn]bool)
 	connBusy = make(map[net.Conn]bool)
-	// **SYNCHRONISATION (WaitGroup)** : Ajoute 1 pour la goroutine `RunServer`
+
+
+	// SYNCHRONISATION (WaitGroup) : Ajoute 1 pour la goroutine `RunServer`
 	serverWG.Add(1)
 
 	// 1. Démarrage de l'écoute TCP
@@ -157,10 +156,11 @@ func RunServer(port *string, dir *string, duration time.Duration) {
 		slog.Error(e.Error())
 		return
 	}
+
 	// 2. Fermeture différée de l'écoute
 	defer func() {
 		l.Close()
-		// **SYNCHRONISATION (WaitGroup)** : Indique que RunServer est terminé
+		// SYNCHRONISATION (WaitGroup): Indique que RunServer est terminé
 		serverWG.Done()
 		slog.Debug("Stopped listening on port " + *port)
 	}()
@@ -173,14 +173,14 @@ func RunServer(port *string, dir *string, duration time.Duration) {
 
 	// 4. Boucle d'acceptation des connexions
 	for {
-		// **SYNCHRONISATION (Channel)** : Utilise `select` pour écouter le canal de terminaison
+		// SYNCHRONISATION (Channel) : Utilise `select` pour écouter le canal de terminaison
 		select {
 		case <-terminateChan:
-			// Signal de `checkForTerminate` ou `handleTerminate` reçu, arrêter l'acceptation.
+			// Si signale reçu de checkTerminate ou handleTermiante alors le serveur ne reçois plus de connexion.
 			slog.Info("Signal de TERMINATE reçu. Arrêt de l'écoute.")
 			return
 		default:
-			// Accepte une nouvelle connexion
+			// Accepte de nouvelles connexions
 			c, e := l.Accept()
 			if e != nil {
 				// Gère l'erreur si l'écoute est fermée
@@ -191,7 +191,7 @@ func RunServer(port *string, dir *string, duration time.Duration) {
 				continue
 			}
 			/* lancement d'une nouvelle goroutine pour gérer le client */
-			// **SYNCHRONISATION (WaitGroup)** : Incrémente pour la nouvelle goroutine client
+			// SYNCHRONISATION (WaitGroup) : Incrémente pour la nouvelle goroutine client
 			clientWG.Add(1) //  Incrémenter le WaitGroup avant de lancer la goroutine
 			go handleClient(c, cleanedRootDir, duration)
 		}
@@ -213,19 +213,19 @@ func handleClient(c net.Conn, rootDir string, duration time.Duration) {
 
 	currentDir := rootDir // Répertoire courant propre à cette connexion
 
-	// 1. Incrémentation du compteur de clients
-	// **SYNCHRONISATION (Mutex)** : Protège `clientCount`
+	// 1. Incrémentation du compteur de clients pour chaque nouvelle connexion hors admin
+	// SYNCHRONISATION (Mutex) : Protège `clientCount`
 	clientCountMux.Lock()
 	clientCount++
 	clientCountMux.Unlock()
 
 	// 2. Ajout à la liste des connexions actives
-	// **SYNCHRONISATION (Mutex)** : Protège `activeConnections`
+	// SYNCHRONISATION (Mutex) : Protège `activeConnections`
 	activeConnectionsMux.Lock()
 	activeConnections[c] = true
 	activeConnectionsMux.Unlock()
-
 	slog.Info("Incoming connection from " + c.RemoteAddr().String())
+
 	// 3. Logique de nettoyage à la fin de la goroutine (defer)
 	defer func() {
 		// Retire de la liste des connexions actives
@@ -236,20 +236,22 @@ func handleClient(c net.Conn, rootDir string, duration time.Duration) {
 		c.Close()
 		slog.Info("Connexion closed for" + c.RemoteAddr().String())
 
-		// Décrémente le compteur de clients
+		// Décrémente le compteur de clients quand un client se déconnecte
 		clientCountMux.Lock()
 		clientCount--
 		clientCountMux.Unlock()
 
-		// **SYNCHRONISATION (WaitGroup)** : Indique que la goroutine client est terminée
+		// SYNCHRONISATION (WaitGroup): Indique que la goroutine client est terminée
 		clientWG.Done()
 	}()
 
+	// Prépare les lecteurs/écrivains pour la connexion
 	reader := bufio.NewReader(c)
 	writer := bufio.NewWriter(c)
 
 	// 4. Boucle de lecture des commandes
 	for {
+		// Lit une ligne de commande envoyée par le client
 		commandLine, err := reader.ReadString('\n')
 		if err != nil {
 			if err != io.EOF {
@@ -258,17 +260,19 @@ func handleClient(c net.Conn, rootDir string, duration time.Duration) {
 			break // Sort de la boucle, déclenchant le `defer`
 		}
 
+		// Nettoie la commande reçue
 		commandLine = strings.TrimSpace(commandLine)
 		slog.Debug("Commande reçu :" + commandLine)
 
 		partie := strings.Fields(commandLine)
 		if len(partie) == 0 {
-			slog.Info("C'est vide")
+			slog.Info("Commande incomplete. Veuillez retaper la commande.")
 			continue
 		}
 		commande := partie[0]
 
-		// 5. Dispatch des commandes
+		// 5. Dispatch des commandes et fait appelle aux handlers appropriés
+		/*--- COMMANDES POUR LISTER LE REPERTOIRE / FICHIERS ---*/
 		if commande == "List" {
 			handleList(c, writer, reader, currentDir, duration)
 		} else if commande == "Get" {
@@ -278,7 +282,8 @@ func handleClient(c net.Conn, rootDir string, duration time.Duration) {
 			}
 			filename := partie[1]
 			handleGet(c, writer, reader, currentDir, filename, duration)
-		} else if commande == "Cd" { // <-- NOUVELLE COMMANDE CD
+		/*--- COMMANDES POUR SE DEPLACER DANS L'ARBORESCENCE ---*/
+		} else if commande == "Cd" {
 			if len(partie) < 2 {
 				slog.Warn("commande incomplete: Cd")
 				writer.WriteString("CommandIncomplete\n")
@@ -289,6 +294,7 @@ func handleClient(c net.Conn, rootDir string, duration time.Duration) {
 			// Met à jour le répertoire courant
 			newDir := handleChangeDir(c, writer, currentDir, rootDir, targetDir, duration)
 			currentDir = newDir
+		/*--- COMMANDES POUR FERMER LA SESSION ---*/
 		} else if commande == "End" {
 			slog.Info("Client" + c.RemoteAddr().String() + "veut se deconnecter")
 			break // Sort de la boucle
@@ -310,19 +316,19 @@ func handleClient(c net.Conn, rootDir string, duration time.Duration) {
 * Note : Utilise `setIsCommandeUsed` et `setConnBusy` pour le suivi d'activité.
  */
 func handleList(c net.Conn, w *bufio.Writer, r *bufio.Reader, pathDir string, duration time.Duration) {
-	// 0. Lancement du temps
+	// 0. Lancement du temps pour le timeout
 	start := time.Now()
+
 	// 1. Début de l'opération : Marque le serveur et la connexion comme occupés
 	setIsCommandeUsed(true)
 	defer setIsCommandeUsed(false)
-
 	setConnBusy(c, true)
 	defer setConnBusy(c, false)
 
 	messages := []string{}
 
-	// 2. Construction de l'arborescence (récursif)
-	err := buildTree(pathDir, "", &messages, true)
+	// 2. Construction de l'arborescence (récursif grace a buildTree)
+	err := buildTree(pathDir, "", &messages, true) // true indique que c'est la racine
 	if err != nil {
 		slog.Error("Erreur lors de la construction de l'arborescence: " + err.Error())
 		w.WriteString("FileCnt 0\n")
@@ -331,14 +337,14 @@ func handleList(c net.Conn, w *bufio.Writer, r *bufio.Reader, pathDir string, du
 		return
 	}
 
-	count := len(messages)
+	count := len(messages) // Nombre de lignes dans l'arborescence
 
 	// 3. Envoi de l'en-tête "FileCnt X"
 	countMsg := fmt.Sprintf("FileCnt %d\n", count)
 	w.WriteString(countMsg)
 	slog.Debug("Serveur envoi: " + strings.TrimSpace(countMsg))
 
-	// 4. Envoi de la liste détaillée (l'arborescence)
+	// 4. Envoi de le tree ligne par ligne
 	for _, msg := range messages {
 		w.WriteString(msg)
 	}
@@ -353,7 +359,7 @@ func handleList(c net.Conn, w *bufio.Writer, r *bufio.Reader, pathDir string, du
 		return
 	}
 
-	// 5. Attente du OK par le client (accusé de réception)
+	// 5. Attente du OK par le client
 	ok, err := r.ReadString('\n')
 	if err != nil || strings.TrimSpace(ok) != "OK" {
 		// Log l'erreur si le client n'envoie pas le OK attendu
@@ -373,20 +379,21 @@ func handleList(c net.Conn, w *bufio.Writer, r *bufio.Reader, pathDir string, du
 * Note : Utilise `setIsCommandeUsed` et `setConnBusy` pour le suivi d'activité.
  */
 func handleGet(c net.Conn, w *bufio.Writer, r *bufio.Reader, pathDir string, filename string, duration time.Duration) {
-	// 0. Lancement du temps
+	// 0. Lancement du temps pour le timeout
 	start := time.Now()
-	setIsCommandeUsed(true)
 
+	//Marque le serveur et la connexion comme occupés
+	setIsCommandeUsed(true)
 	setConnBusy(c, true)
 	defer setConnBusy(c, false)
 	defer setIsCommandeUsed(false) // Placé ici pour s'assurer qu'il est appelé après setConnBusy(false)
 
-	filePath := filepath.Join(pathDir, filename)
+	filePath := filepath.Join(pathDir, filename) // Chemin complet du fichier
 
 	// 1. Vérification du statut caché du fichier
-	// **SYNCHRONISATION (Mutex)** : Protège `hiddenFiles`
+	// SYNCHRONISATION (Mutex) : Protège `hiddenFiles`
 	hiddenFilesMux.Lock()
-	_, isHidden := hiddenFiles[filename]
+	_, isHidden := hiddenFiles[filename] // Vérifie si le fichier est dans la map des fichiers cachés
 	hiddenFilesMux.Unlock()
 
 	if isHidden {
@@ -415,19 +422,17 @@ func handleGet(c net.Conn, w *bufio.Writer, r *bufio.Reader, pathDir string, fil
 
 	// 3. Récupération de la taille
 	fileInfo, _ := file.Stat()
-	fileSize := fileInfo.Size()
+	fileSize := fileInfo.Size() // Taille du fichier en octets
 
 	/* 4. Envoi de l'en-tête de début et de la taille */
-	w.WriteString("Start\n")
+	w.WriteString("Start\n") // Indique le début du transfert
 	w.Flush()
-
-	w.WriteString(fmt.Sprintf("%d\n", fileSize))
+	w.WriteString(fmt.Sprintf("%d\n", fileSize)) // Envoie la taille du fichier
 	w.Flush()
 
 	/* 5. Copie du contenu du fichier vers le réseau */
-	// io.Copy est optimisé pour les transferts de stream (ici le fichier vers le buffer réseau)
-	n, err := io.Copy(w, file)
-	w.Flush() // Force l'envoi des données copiées
+	n, err := io.Copy(w, file) // io.Copy est optimisé pour les transferts du fichier vers le buffer réseau
+	w.Flush() // Force l'envoi
 
 	if err != nil || n != fileSize {
 		slog.Error("Transfert incomplet ou échoué",
@@ -474,12 +479,14 @@ func handleGet(c net.Conn, w *bufio.Writer, r *bufio.Reader, pathDir string, fil
 * Note : Protège `hiddenFiles` avec `hiddenFilesMux`.
  */
 func handleHide(w *bufio.Writer, r *bufio.Reader, pathDir string, filename string, duration time.Duration) {
-	// 0. Lancement du temps
+	// 0. Lancement du temps pour le timeout
 	start := time.Now()
-	filePath := filepath.Join(pathDir, filename)
+
+	//  Vérifie l'existence du fichier
+	filePath := filepath.Join(pathDir, filename) // Chemin complet du fichier
 	fileInfo, err := os.Stat(filePath)
 
-	if os.IsNotExist(err) || err != nil || (!fileInfo.Mode().IsRegular() && !fileInfo.IsDir()) {
+	if os.IsNotExist(err) || err != nil || (!fileInfo.Mode().IsRegular() && !fileInfo.IsDir()) { // Vérifie si le fichier existe et est régulier ou répertoire
 		slog.Warn("Tentative de cacher un élément inconnu ou non régulier/répertoire : " + filename)
 		w.WriteString("FileUnknown\n")
 		w.Flush()
@@ -487,12 +494,12 @@ func handleHide(w *bufio.Writer, r *bufio.Reader, pathDir string, filename strin
 	}
 
 	// 1. Ajoute le fichier a la liste des fichiers cachés
-	// **SYNCHRONISATION (Mutex)** : Protège `hiddenFiles`
+	// SYNCHRONISATION (Mutex) : Protège `hiddenFiles`
 	hiddenFilesMux.Lock()
 	defer hiddenFilesMux.Unlock()
 
-	if _, alreadyHidden := hiddenFiles[filename]; !alreadyHidden {
-		hiddenFiles[filename] = true
+	if _, alreadyHidden := hiddenFiles[filename]; !alreadyHidden { // Évite de ré-ajouter si déjà caché
+		hiddenFiles[filename] = true // Ajoute à la map des fichiers cachés
 		slog.Info("Element caché: " + filename)
 	}
 	// Vérification du temps mis par la fonction
@@ -513,25 +520,26 @@ func handleHide(w *bufio.Writer, r *bufio.Reader, pathDir string, filename strin
 * Note : Protège `hiddenFiles` avec `hiddenFilesMux`.
  */
 func handleReveal(w *bufio.Writer, r *bufio.Reader, pathDir string, filename string, duration time.Duration) {
-	// 0. Lancement du temps
+	// 0. Lancement du temps pour le timeout
 	start := time.Now()
-	filePath := filepath.Join(pathDir, filename)
 
-	fileInfo, err := os.Stat(filePath)
+	//  Vérifie l'existence du fichier
+	filePath := filepath.Join(pathDir, filename) // Chemin complet du fichier
+	fileInfo, err := os.Stat(filePath) // Récupère les infos du fichier
 
-	if os.IsNotExist(err) || err != nil || (!fileInfo.Mode().IsRegular() && !fileInfo.IsDir()) {
-		slog.Warn("Tentative de révéler un élément inconnu ou non régulier/répertoire : " + filename)
+	if os.IsNotExist(err) || err != nil || (!fileInfo.Mode().IsRegular() && !fileInfo.IsDir()) { // Vérifie si le fichier existe et est régulier ou répertoire
+		slog.Warn("Tentative de révéler un élément inconnu ou non régulier/répertoire : " + filename) 
 		w.WriteString("FileUnknown\n")
 		w.Flush()
 		return
 	}
 
 	// 1. Retire le fichier de la liste des fichiers cachés
-	// **SYNCHRONISATION (Mutex)** : Protège `hiddenFiles`
+	// SYNCHRONISATION (Mutex) : Protège `hiddenFiles`
 	hiddenFilesMux.Lock()
 	defer hiddenFilesMux.Unlock()
 
-	if _, wasHidden := hiddenFiles[filename]; wasHidden {
+	if _, wasHidden := hiddenFiles[filename]; wasHidden { // Vérifie si le fichier était caché
 		delete(hiddenFiles, filename) // Supprime l'entrée de la map
 		slog.Info("Element révélé: " + filename)
 	} else {
@@ -543,7 +551,6 @@ func handleReveal(w *bufio.Writer, r *bufio.Reader, pathDir string, filename str
 		w.Flush()
 		return
 	}
-	//Répond OK
 
 	// 2. Répond OK
 	w.WriteString("OK\n")
@@ -559,17 +566,17 @@ func handleReveal(w *bufio.Writer, r *bufio.Reader, pathDir string, filename str
  */
 func checkForTerminate(l net.Listener) {
 	for {
-		if terminateRequest {
-			// **SYNCHRONISATION (Mutex)** : Protège la lecture de `isCommandeUsed`
+		if terminateRequest { // Si une requête de terminaison a été faite
+			// SYNCHRONISATION (Mutex): Protège la lecture de `isCommandeUsed`
 			isCommandeUsedMux.Lock()
-			commandInProgress := isCommandeUsed
+			commandInProgress := isCommandeUsed // Vérifie si une commande est en cours
 			isCommandeUsedMux.Unlock()
 
-			if !commandInProgress {
+			if !commandInProgress { // Si aucune commande n'est en cours
 				slog.Info("Aucune commande utilisée : on ferme le serveur (via checkForTerminate)")
 				// Fermer le listener pour arrêter `RunServer`
 				l.Close()
-				// **SYNCHRONISATION (Channel)** : Signaler à `RunServer` de sortir de la boucle `select`
+				// SYNCHRONISATION (Channel) : Signaler à `RunServer` de sortir de la boucle `select`
 				select {
 				case <-terminateChan: // Si déjà fermé, on ne fait rien
 				default:
@@ -595,10 +602,10 @@ func handleTerminate(adminConn net.Conn, w *bufio.Writer) {
 	terminateRequest = true // Met à jour le flag
 
 	// 1. Stopper l'écoute de RunServer
-	// **SYNCHRONISATION (Channel)** : Ferme le canal de terminaison (une seule fois)
+	// SYNCHRONISATION (Channel) : Ferme le canal de terminaison (une seule fois)
 	select {
-	case <-terminateChan:
-		// déjà fermé (e.g. par checkForTerminate)
+	case <-terminateChan: // Si le canal est
+		// déjà fermé ( par checkForTerminate)
 	default:
 		close(terminateChan)
 	}
@@ -607,18 +614,18 @@ func handleTerminate(adminConn net.Conn, w *bufio.Writer) {
 	// 2. Boucle de déconnexion progressive des clients inactifs (sauf l'admin)
 	for {
 		// Snapshot des connexions actuelles (sauf l'admin)
-		// **SYNCHRONISATION (Mutex)** : Protège `activeConnections`
+		// SYNCHRONISATION (Mutex) : Protège `activeConnections`
 		activeConnectionsMux.Lock()
-		conns := make([]net.Conn, 0, len(activeConnections))
-		for conn := range activeConnections {
+		conns := make([]net.Conn, 0, len(activeConnections)) // Pré-allocation
+		for conn := range activeConnections { // Parcours des connexions actives
 			if conn == adminConn {
 				continue
 			}
-			conns = append(conns, conn)
+			conns = append(conns, conn) // Ajoute à la liste temporaire
 		}
 		activeConnectionsMux.Unlock()
 
-		// Fermer les connexions qui ne sont pas "busy"
+		// Fermer les connexions qui ne sont pas occupées
 		for _, conn := range conns {
 			if !getConnBusy(conn) { // Vérification du statut occupé
 				slog.Debug("Fermeture de la connexion inactive : " + conn.RemoteAddr().String())
@@ -627,12 +634,12 @@ func handleTerminate(adminConn net.Conn, w *bufio.Writer) {
 		}
 
 		// Vérifier s'il reste des clients
-		// **SYNCHRONISATION (Mutex)** : Protège `clientCount`
+		// SYNCHRONISATION (Mutex) : Protège `clientCount`
 		clientCountMux.Lock()
-		remaining := clientCount
+		remaining := clientCount // Nombre de clients restants
 		clientCountMux.Unlock()
 
-		// Si seul l'admin reste (clientCount devrait être 1 si l'admin n'a pas quitté)
+		// Si seul l'admin reste, on peut sortir
 		if remaining <= 1 {
 			break
 		}
@@ -656,53 +663,55 @@ func handleTerminate(adminConn net.Conn, w *bufio.Writer) {
 * La fonction buildTree construit récursivement l'arborescence des fichiers et répertoires
 * en respectant les fichiers cachés.
 *
-* Note : Cette fonction est appelée dans `handleList`.
-* Note : Utilise `hiddenFilesMux` pour lire la liste des fichiers cachés.
+* Note : Cette fonction est appelée dans `handleList` et Utilise `hiddenFilesMux` pour lire la liste des fichiers cachés.
  */
 func buildTree(pathDir string, prefix string, messages *[]string, isRoot bool) error {
 
+	// Lit le contenu du répertoire
 	entries, err := os.ReadDir(pathDir)
 	if err != nil {
-		return err
+		return err // Retourne l'erreur si la lecture échoue
 	}
 
+	// Sépare les répertoires et les fichiers pour un tri personnalisé
 	dirs := []os.DirEntry{}
 	files := []os.DirEntry{}
 
 	// Filtrage des éléments cachés (via la map `hiddenFiles` et les fichiers `.`)
-	// **SYNCHRONISATION (Mutex)** : Protège la lecture de `hiddenFiles`
+	// SYNCHRONISATION (Mutex) : Protège la lecture de `hiddenFiles`
 	hiddenFilesMux.Lock()
-	for _, entry := range entries {
+	for _, entry := range entries { // Parcours des entrées du répertoire
 		name := entry.Name()
 
-		if strings.HasPrefix(name, ".") { // Ignore les fichiers/répertoires Linux cachés
+		if strings.HasPrefix(name, ".") { // Ignore les fichiers/répertoires de base cachés
 			continue
 		}
 
 		if _, isHidden := hiddenFiles[name]; isHidden { // Ignore les fichiers cachés via commande Hide
 			continue
 		}
-		// ... (suite du filtrage)
-		if entry.IsDir() {
-			dirs = append(dirs, entry)
-		} else if entry.Type().IsRegular() {
-			files = append(files, entry)
+
+		if entry.IsDir() { // Si c'est un répertoire
+			dirs = append(dirs, entry) // Ajoute à la liste des répertoires
+		} else if entry.Type().IsRegular() { // Si c'est un fichier régulier
+			files = append(files, entry) 	// Ajoute à la liste des fichiers
 		}
 	}
 	hiddenFilesMux.Unlock()
+	sortedEntries := append(dirs, files...) // Réunit les répertoires et fichiers, répertoires en premier
+	totalEntries := len(sortedEntries) // Nombre total d'entrées à traiter
 
-	// ... (suite de la logique de construction de l'arborescence)
-	sortedEntries := append(dirs, files...)
-	totalEntries := len(sortedEntries)
-
+	// Si c'est la racine, ajoute un point pour représenter le répertoire courant
 	if isRoot {
 		*messages = append(*messages, ".\n")
 	}
 
-	for i, entry := range sortedEntries {
-		isLast := i == totalEntries-1
-		linePref := DirPrefix
-		nextPref := ChildPrefix
+	// Parcours des entrées pour construire l'arborescence
+	for i, entry := range sortedEntries { 
+		isLast := i == totalEntries-1 // Vérifie si c'est la dernière entrée
+		// Détermine les préfixes en fonction de la position dans l'arborescence
+		linePref := DirPrefix 
+		nextPref := ChildPrefix 
 		if isLast {
 			linePref = LastDirPrefix
 			nextPref = EmptyPrefix
@@ -711,8 +720,8 @@ func buildTree(pathDir string, prefix string, messages *[]string, isRoot bool) e
 		name := entry.Name()
 		var line string
 
-		if entry.IsDir() {
-			line = fmt.Sprintf("%s%s%s\n", prefix, linePref, name)
+		if entry.IsDir() { // Si c'est un répertoire
+			line = fmt.Sprintf("%s%s%s\n", prefix, linePref, name) // Formate la ligne pour un répertoire
 		} else {
 			info, err := entry.Info()
 			fileSize := int64(0)
@@ -726,11 +735,11 @@ func buildTree(pathDir string, prefix string, messages *[]string, isRoot bool) e
 		*messages = append(*messages, line)
 
 		// Appel récursif pour les sous-répertoires
-		if entry.IsDir() {
-			newPath := filepath.Join(pathDir, name)
-			newPrefix := prefix + nextPref
+		if entry.IsDir() { // Si c'est un répertoire
+			newPath := filepath.Join(pathDir, name) // Nouveau chemin
+			newPrefix := prefix + nextPref // Nouveau préfixe pour l'indentation
 
-			if err := buildTree(newPath, newPrefix, messages, false); err != nil {
+			if err := buildTree(newPath, newPrefix, messages, false); err != nil { 
 				slog.Error(fmt.Sprintf("Erreur lecture répertoire %s: %s", newPath, err.Error()))
 			}
 		}
@@ -744,16 +753,17 @@ func buildTree(pathDir string, prefix string, messages *[]string, isRoot bool) e
 * Note : Utilise `setIsCommandeUsed` et `setConnBusy` pour le suivi d'activité.
  */
 func handleChangeDir(c net.Conn, w *bufio.Writer, currentDir string, rootDir string, targetDir string, duration time.Duration) string {
-	// 0. Lancement du temps
+	// 0. Lancement du temps pour le timeout
 	start := time.Now()
+
+	// Marque le serveur et la connexion comme occupés
 	setIsCommandeUsed(true)
 	defer setIsCommandeUsed(false)
-
 	setConnBusy(c, true)
 	defer setConnBusy(c, false)
 
 	// 1. Vérifie l'absence de chemins absolus (sécurité)
-	if filepath.IsAbs(targetDir) {
+	if filepath.IsAbs(targetDir) { // Chemin absolu interdit
 		slog.Warn("Tentative d'utiliser un chemin absolu: " + targetDir)
 		w.WriteString("AbsolutePathsForbidden\n")
 		w.Flush()
@@ -761,8 +771,17 @@ func handleChangeDir(c net.Conn, w *bufio.Writer, currentDir string, rootDir str
 	}
 
 	// 2. Calcule et nettoie le chemin cible
-	absTarget := filepath.Join(currentDir, targetDir)
-	cleanTarget := filepath.Clean(absTarget)
+	absTarget := filepath.Join(currentDir, targetDir) // Résout le chemin relatif
+	cleanTarget := filepath.Clean(absTarget) // Nettoie le chemin
+
+	// Assure que le nouveau répertoire est toujours sous le répertoire racine
+	rel, err := filepath.Rel(rootDir, cleanTarget)
+	if err != nil || strings.HasPrefix(rel, "..") {
+		slog.Warn("Tentative d'accès hors du répertoire racine: " + cleanTarget)
+		w.WriteString("AccessDenied\n")
+		w.Flush()
+		return currentDir
+	}
 
 	slog.Debug("Tentative de changement de dir vers : " + cleanTarget)
 

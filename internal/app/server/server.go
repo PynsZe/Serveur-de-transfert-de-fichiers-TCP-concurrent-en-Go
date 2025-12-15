@@ -415,6 +415,12 @@ func handleGet(c net.Conn, w *bufio.Writer, r *bufio.Reader, pathDir string, fil
 
 	// 3. Récupération de la taille
 	fileInfo, _ := file.Stat()
+	//Vérification que le fichier donné est vraiment un fichier
+	if !fileInfo.Mode().IsRegular() {
+		w.WriteString("NotAFile\n")
+		w.Flush()
+		return
+	}
 	fileSize := fileInfo.Size()
 
 	/* 4. Envoi de l'en-tête de début et de la taille */
